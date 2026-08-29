@@ -3,7 +3,7 @@
 # malformed one must fail loudly here rather than produce an empty component list three commands
 # later — which would render an empty CI workflow and look like success.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 # shellcheck source=lib/config.sh
 source lib/config.sh
 
@@ -42,23 +42,22 @@ out="$(ACB_CONFIG="$TMP/nope.json" acb_config_validate 2>&1)"; got=$?
 if [[ "$got" -eq 1 && "$out" == *"no "* ]]; then ok "rejects a missing config file"
 else bad "rejects a missing config file" "expected exit 1, got ${got}: ${out}"; fi
 
-# Accessors
+# Accessors. An `asserts_eq` helper rather than `[[ … ]] && ok || bad`: that idiom is not
+# if-then-else — if `ok` ever fails, `bad` runs too and the case reports both ways.
+# asserts_eq <name> <expected> <actual>
+asserts_eq() {
+  if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1" "expected '$2', got '$3'"; fi
+}
+
 write_cfg "$VALID"
 export ACB_CONFIG="$TMP/.acb.json"
-[[ "$(acb_components)" == "backend" ]] \
-  && ok "acb_components lists ids" || bad "acb_components lists ids" "got '$(acb_components)'"
-[[ "$(acb_targets backend | tr '\n' ' ')" == "lint test " ]] \
-  && ok "acb_targets lists targets" || bad "acb_targets lists targets" "got '$(acb_targets backend)'"
-[[ "$(acb_check_name backend)" == "Backend checks" ]] \
-  && ok "acb_check_name reads checkName" || bad "acb_check_name reads checkName" "got '$(acb_check_name backend)'"
-[[ "$(acb_runner backend)" == "ubuntu-latest" ]] \
-  && ok "acb_runner defaults sensibly" || bad "acb_runner defaults sensibly" "got '$(acb_runner backend)'"
-[[ "$(acb_process doc)" == "docs/sdlc.md" ]] \
-  && ok "acb_process reads a scalar" || bad "acb_process reads a scalar" "got '$(acb_process doc)'"
-[[ "$(acb_process_arr dependabotEcosystems)" == "npm_and_yarn" ]] \
-  && ok "acb_process_arr reads an array" || bad "acb_process_arr reads an array" "got '$(acb_process_arr dependabotEcosystems)'"
-[[ "$(acb_template repo)" == "igor-ka/acb" ]] \
-  && ok "acb_template reads the repo" || bad "acb_template reads the repo" "got '$(acb_template repo)'"
+asserts_eq "acb_components lists ids"      "backend"           "$(acb_components)"
+asserts_eq "acb_targets lists targets"     "lint test "        "$(acb_targets backend | tr '\n' ' ')"
+asserts_eq "acb_check_name reads checkName" "Backend checks"   "$(acb_check_name backend)"
+asserts_eq "acb_runner defaults sensibly"  "ubuntu-latest"     "$(acb_runner backend)"
+asserts_eq "acb_process reads a scalar"    "docs/sdlc.md"      "$(acb_process doc)"
+asserts_eq "acb_process_arr reads an array" "npm_and_yarn"     "$(acb_process_arr dependabotEcosystems)"
+asserts_eq "acb_template reads the repo"   "igor-ka/acb"       "$(acb_template repo)"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

@@ -3,7 +3,7 @@
 # by design. A caller — often an agent following CLAUDE.md rather than a human reading stderr —
 # distinguishes "you typed it wrong" from "I declined" on the code alone.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); printf '  ✓ %s\n' "$1"; }
