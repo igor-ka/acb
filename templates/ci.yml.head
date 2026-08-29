@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Job `name:` values are a contract. The branch ruleset requires these exact check names, so
+# renaming one blocks every merge until the ruleset is updated to match. They come from each
+# component's `checkName` in .acb.json, never from its directory name — those two disagree more
+# often than you would expect. Regenerate both together, or change neither.
+jobs:

@@ -1,0 +1,8 @@
+  @@ID@@:
+    name: @@CHECK_NAME@@
+    runs-on: @@RUNNER@@
+    defaults:
+      run:
+        working-directory: @@ID@@
+    steps:
+      - uses: actions/checkout@v5

@@ -1,0 +1,53 @@
+# Worked example
+
+A single feature walked through the seven phases, so the *shape* of each artifact is visible.
+Replace it with one of your own once you have one — a real example from this repository teaches
+more than an invented one.
+
+## 0. Track — the epic
+
+One line is correct at creation. Its only job is to record that a problem exists.
+
+```markdown
+# Epic: uploads time out on large files
+
+## Problem
+Files over ~50 MB fail with a gateway timeout. Users retry, which makes it worse.
+```
+
+Fileable without knowing the solution. That is the test.
+
+## 1. Spec — only if there are real open questions
+
+Objective, boundaries, success criteria, open questions. A spec earns its existence by surfacing
+something you do not yet know; if its Open Questions section is empty, the plan absorbs it.
+
+## 2. Plan — ordered, verifiable steps
+
+Header names the goal, the architecture, and the **PR boundaries** — one line per pull request,
+each naming the child issue it closes. Then bite-sized tasks: write the failing test, run it, make
+it pass, run it again, commit.
+
+The plan gets a staff-engineer review before any code is written. Mechanical findings are applied
+and listed; judgment findings are surfaced and block.
+
+## 3-4. Build and verify
+
+Thin slices, each leaving the tree green. `./verify.sh` in each component you touched, before
+pushing — the same script CI runs.
+
+## 5-6. Review and merge
+
+Code review and security review against the pending diff. Then CI is the gate: the required
+checks decide, not a human's reading of the diff.
+
+```markdown
+## Children
+- [x] #41 — stream uploads to storage instead of buffering
+- [ ] #42 — surface progress in the client
+```
+
+## 7. Document
+
+An ADR when a choice would be expensive to reverse. Say what was rejected and why — the
+alternatives are the part that is hard to reconstruct later.
