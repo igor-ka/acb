@@ -6,6 +6,7 @@ cd "$(dirname "$0")/.." || exit 1
 
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); printf '  ✓ %s\n' "$1"; }
+# shellcheck disable=SC2001  # per-line indent; ${var//…} cannot express a line anchor
 bad() { fail=$((fail + 1)); printf '  ✗ %s\n%s\n' "$1" "$(sed 's/^/      /' <<<"$2")"; }
 
 # asserts_empty <name> <output>

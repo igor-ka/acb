@@ -4,7 +4,7 @@
 # the "PR shape" job runs this same file as its first step, so the two cannot drift.
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 SCRIPT="./check-pr-shape.sh"
 export GITHUB_REPOSITORY="example/repo"
 
@@ -101,9 +101,11 @@ case_ "an HTML comment marker inside a fence does not disable the check" 1 "feat
 
 Closes #65'
 
+# shellcheck disable=SC2016  # literal backticks are the fixture; expansion would defeat it
 case_ "a closer in an inline code span is ignored" 0 "feat: thing" \
   'Closes #64 and the doc says `Closes #65`'
 
+# shellcheck disable=SC2016  # as above — the backticks are data, not syntax
 case_ "a closer in a double-backtick span is ignored" 0 "feat: thing" \
   'Closes #64 and the doc says ``Closes #65`` verbatim'
 

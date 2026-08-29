@@ -16,7 +16,7 @@
 # touches watched files is red by construction.
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 SCRIPT="./check-sdlc-sync.sh"
 EXEMPT_LINE="author is dependabot[bot]"
 

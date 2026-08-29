@@ -62,6 +62,7 @@ strip_comments() {
 # and the failure message's advice ("put the quotation in a fence") does not apply to a span.
 # Double-backtick spans go first so their contents are not exposed by the single-backtick pass.
 strip_code_spans() {
+  # shellcheck disable=SC2016  # the backticks are the pattern being matched, not substitution
   sed -e 's/``[^`]*``//g' -e 's/`[^`]*`//g'
 }
 
