@@ -47,7 +47,10 @@ make_toolkit() {
 make_consumer() {
   local toolkit="$1" commit="$2" c; c="$(mktemp -d)"
   mkdir -p "$c/skills"
-  cp "$toolkit/carried/skills/a.md" "$c/skills/a.md"
+  # The file AS OF the recorded commit, not as of the toolkit's HEAD. A consumer that has not
+  # pulled holds the old content; copying the new content while recording the old commit would
+  # fabricate a repository that never existed.
+  git -C "$toolkit" show "$commit:carried/skills/a.md" > "$c/skills/a.md"
   cat > "$c/.acb.json" <<JSON
 { "template": { "repo": "example/acb", "commit": "$commit" },
   "process": { "doc": "docs/sdlc.md", "watched": ["^scripts/"], "dependabotEcosystems": [] },
@@ -111,6 +114,15 @@ out="$(run_acb "$C" status)"
 if grep -q 'ahead: 1 carried file' <<<"$out" && grep -q 'skills/a.md' <<<"$out"; then
   ok "status reports ahead and names the file"
 else bad "status reports ahead and names the file" "$out"; fi
+
+# --- behind does not masquerade as ahead ---
+# A file the consumer never touched must not be reported as ahead just because upstream moved.
+# Following that advice would propose a stale copy and revert the upstream change.
+C2="$(make_consumer "$TOOLKIT" "$HEAD_SHA")"     # recorded at the OLD commit, file untouched
+out="$(run_acb "$C2" status)"
+if grep -q 'behind: 1 commit' <<<"$out" && grep -q 'ahead: 0' <<<"$out"; then
+  ok "a behind-but-unedited file is not reported as ahead"
+else bad "a behind-but-unedited file is not reported as ahead" "$out"; fi
 
 # --- propose: refuses a file that is not carried ---
 printf 'x\n' > "$C/generated.md"

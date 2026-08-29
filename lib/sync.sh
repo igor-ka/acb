@@ -24,9 +24,20 @@ acb_cmd_status() {
 
   # Ahead is per-file, not per-commit: the question a consumer asks is "what have I changed that
   # the toolkit does not have", and the answer is the argument list `acb propose` takes.
+  #
+  # Compare against the RECORDED commit, not the toolkit's HEAD. Against HEAD, a file the
+  # consumer never touched shows as ahead the moment upstream changes it — the consumer is
+  # merely behind — and following that advice would propose a stale copy and revert the upstream
+  # change. The two states are independent and must be computed independently.
   while read -r p; do
     [[ -f "$p" ]] || continue
-    cmp -s "$p" "$ACB_ROOT/carried/$p" || ahead+=("$p")
+    if [[ -n "$recorded" ]] && git -C "$ACB_ROOT" cat-file -e "$recorded:carried/$p" 2>/dev/null; then
+      cmp -s "$p" <(git -C "$ACB_ROOT" show "$recorded:carried/$p" 2>/dev/null) || ahead+=("$p")
+    else
+      # No recorded commit, or the file did not exist at it: fall back to HEAD, which is the
+      # best available answer rather than a wrong one.
+      cmp -s "$p" "$ACB_ROOT/carried/$p" || ahead+=("$p")
+    fi
   done < "$ACB_ROOT/MANIFEST"
   if ((${#ahead[@]})); then
     echo "ahead: ${#ahead[@]} carried file(s) differ — 'acb propose <path>' to send upstream"
