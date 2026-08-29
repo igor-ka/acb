@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-ACB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Normally the checkout this script lives in. Overridable so the suite can point at a throwaway
+# fixture: pull and propose WRITE here — propose branches, commits and pushes — so a test that
+# could not redirect it would open pull requests as a side effect of running.
+ACB_ROOT="${ACB_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 export ACB_ROOT
 
 usage() {
