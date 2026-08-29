@@ -1,5 +1,10 @@
 # Vendored skills — attribution
 
+> Both upstreams are MIT-licensed. Their copyright remains with their authors, and the full
+> licence texts live in the upstream repositories linked below. Redistributing this directory —
+> which every consumer of the toolkit does — carries that attribution with it, which is why this
+> file is part of the carried set rather than a note in the toolkit only.
+
 Everything in this directory is **vendored**: copied in, adapted to this repo, and reviewed as
 part of the diff. Nothing here is fetched at runtime, and no plugin marketplace is wired into
 this repository. Upstream commits are pinned below so the next sync is a reviewable diff rather
