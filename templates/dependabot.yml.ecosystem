@@ -1,0 +1,5 @@
+  - package-ecosystem: "@@ECOSYSTEM@@"
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

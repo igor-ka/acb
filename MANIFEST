@@ -16,8 +16,10 @@
 .github/workflows/pr-shape.yml
 .github/workflows/sdlc-docs.yml
 docs/sdlc.md
+scripts/check-conformance.sh
 scripts/check-pr-shape.sh
 scripts/check-sdlc-sync.sh
+scripts/tests/check-conformance.test.sh
 scripts/tests/check-pr-shape.test.sh
 scripts/tests/check-sdlc-sync.test.sh
 scripts/tests/dependabot-auto-merge-disarm.test.sh

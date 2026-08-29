@@ -22,7 +22,7 @@ asserts "no arguments prints usage"      2 "usage: acb"
 asserts "unknown subcommand exits 2"     2 "unknown command 'frobnicate'" frobnicate
 asserts "--help exits 0"                 0 "usage: acb" --help
 asserts "status outside an acb repo"     1 "run 'acb init' first" status
-asserts "init is not implemented yet"    1 "not implemented until ACB-4" init /tmp/nowhere
+asserts "init with no directory is usage" 2 "usage: acb init" init
 asserts "pull is not implemented yet"    1 "not implemented until ACB-5" pull
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
