@@ -1,0 +1,784 @@
+# Software development lifecycle
+
+How a change gets from an idea to `main` in this repository, and which skill governs each step.
+
+This document is a **contract**. If you change the development process — the skills in
+`.claude/skills/`, any of the three `verify.sh` scripts, `infra/tests/`, anything in
+`scripts/`, or a workflow in `.github/workflows/` — update this file in the same change. The `SDLC docs` CI job enforces it,
+and `CLAUDE.md` points here as the source of truth.
+See [Changing this SDLC](#changing-this-sdlc).
+
+---
+
+## The three layers
+
+The single most useful idea here: **an instruction is a request; a check is a guarantee.** Work
+is allocated to the weakest layer that can still hold it.
+
+| Layer | Where it lives | Property |
+| --- | --- | --- |
+| **Enforced** | `verify.sh`, `.github/workflows/ci.yml`, the "Protect main" ruleset | Deterministic. Cannot be talked out of, forgotten, or skipped under deadline pressure. |
+| **Procedural** | `.claude/skills/*` | Loaded on demand, only when relevant. Keeps long procedure out of always-on context. |
+| **Always-on** | `CLAUDE.md` | Policy and routing only. Every line competes for attention, so it stays small. |
+
+If something *must* happen, it belongs in the enforced layer. `CLAUDE.md` explains the gates;
+it is not itself a gate.
+
+---
+
+## The loop
+
+```
+                        ┌──── debug ────┐
+                        ▼               │
+ TRACK ─▶ SPEC ─▶ PLAN ─▶ BUILD ─▶ VERIFY ─▶ REVIEW ─▶ MERGE ─▶ DOCUMENT
+   │                                                     │
+   └── epic issue                        "Closes #N" ────┘
+       child issues (after the plan)
+```
+
+`BUILD → VERIFY` is a tight inner loop run once per slice, not a single pass. Everything before
+`MERGE` is repeatable; only merge is one-way. Each phase below names the skill that governs it.
+
+---
+
+## Phases
+
+### 0. Track — *does an issue need to exist?*
+
+**Not a skill — a judgment call, made before anything else.**
+
+An issue is a unit of **commitment**; a PR is a unit of **change**. They are not 1:1, and
+treating them as if they were is what turns a tracker into noise.
+
+**Create an issue when someone other than you needs to know the work exists** — a future reader
+wondering why the code looks this way, a decision parked until later, or work that will span
+more than one PR. The trigger is *informational, not size*: a one-line change to `auth.ts` earns
+a ticket; a large refactor of throwaway code may not.
+
+**Do not create an issue for work you are about to do right now in a single PR.** The PR is
+already the record. Ticket-per-commit fills the tracker until nothing in it can be found.
+
+| Artifact | Captures | Lives in |
+| --- | --- | --- |
+| **Epic issue** | the *problem*, and why it matters | GitHub, unlabelled |
+| **Plan** | the *solution* | `docs/plans/YYYY-MM-DD-<name>.md` |
+| **Child issue** | one independently deliverable slice | GitHub, `enhancement` |
+| **PR** | one change, closing a child *(enforced — [One child per PR](#one-child-per-pr))* | GitHub |
+
+Three rules that keep this honest:
+
+- **Order matters: problem before solution.** The epic must be fileable without knowing how —
+  "a burst of requests can exhaust host resources" is a complete issue. Writing the plan first
+  and back-filling issues inverts it: you committed to a solution before recording the problem.
+- **Children only when independently deliverable.** If a slice can't be worked, reviewed, and
+  merged on its own, it's a checklist item — put it in the epic body, not its own issue.
+- **Design does not live in the tracker.** ADRs and plans are versioned alongside the code they
+  explain; issues link to them. Design written into issue comments is design you will lose.
+
+Close children from the PR body with `Closes #N` so the link is automatic rather than manual.
+
+#### Bugs are the exception
+
+The rule above does **not** apply to defects that reached a deployed environment. A feature issue
+tracks work that *will* happen; a bug issue records that a defect **existed** — so file it even
+when the fix is a ten-minute PR. The PR captures the fix; only the issue captures when it broke,
+who was affected, and what the workaround was while it was open.
+
+- **Never block a production fix on filing a ticket.** For a Sev-1, fix first and file
+  immediately after or in parallel. The record matters; it does not matter more than the outage.
+- **File before fixing** for anything non-urgent — the issue is where duplicate reports converge.
+- **Bug issues want different fields**: symptom, blast radius, how it was detected, repro steps,
+  workaround. Not acceptance criteria.
+- **The reproduction test is the acceptance criterion.** `test-driven-development`'s Prove-It
+  pattern says reproduce the defect with a failing test before fixing it; the issue closes when
+  that test passes.
+
+A bug you catch in your own branch before merge is not this. Just fix it.
+
+*(This repo has no deployed environment yet — see the README's security posture. This rule
+arrives with the Cloud Run work.)*
+
+#### The epic is an index, not a design doc
+
+**A one-line epic is correct at creation.** Its only job is to record that a problem exists.
+*"A burst of requests can exhaust host resources and API budget"* is complete — findable,
+fileable, and committed to nothing.
+
+As artifacts appear, update it with **links, never copies**: Problem, an Artifacts list pointing
+at the spec / plan / ADR, a short Resolved list of closed decisions, and the children checklist.
+Nothing else — pasted content becomes a second copy that goes stale, and the stale copy is the
+one people read.
+
+Test: **an epic should be readable in 30 seconds and tell you where everything else is.** The
+[worked example](sdlc-example.md) shows one evolving.
+
+> **Why this repo carries the ceremony.** Solo, a tracker's coordination value is close to zero —
+> nobody is going to duplicate your work. It is kept here deliberately anyway: this is a learning
+> project, and **rehearsing the discipline is the point**. The habit is what transfers to a
+> setting where coordination isn't optional; the tracker here is practice, and practice only
+> works if you do it when it isn't strictly necessary.
+
+### 1. Spec — *what are we building, and what's out of scope?*
+
+**Skill:** `spec-driven-development`
+
+Used when requirements are vague or a change is significant enough that building the wrong thing
+is the main risk. Produces objective, boundaries, success criteria, and — most importantly —
+**open questions**, which get answered before planning starts.
+
+Skip for small, obvious changes. A one-line bug fix does not need a spec.
+
+**Specs are saved to `docs/specs/YYYY-MM-DD-<name>.md`** — in the repo, never in an issue. Same
+reasoning as ADRs and plans: versioned alongside the code they describe, reviewable in a PR, and
+they outlive any tracker. The epic *links* to the spec; it never contains it.
+
+**Only write a separate spec when there are real open questions.** The `writing-plans` header
+already carries Goal, Architecture, and Tech Stack. When requirements are clear, the plan absorbs
+the spec and a separate document is ceremony. A spec earns its existence by surfacing something
+you do not yet know — if it has no Open Questions section worth reading, you did not need it.
+
+**The skill's template is greenfield-shaped.** Its six areas include Tech Stack, Commands,
+Project Structure, Code Style, and Testing Strategy — all of which already live in `CLAUDE.md`
+and `README.md` here. For a *feature* spec in this repo the parts that earn their keep are
+**Objective, Boundaries, Success Criteria, and Open Questions**. Link out for the rest rather
+than restating it and letting the copy rot.
+
+### 2. Plan — *what are the ordered, verifiable steps?*
+
+**Skill:** `writing-plans`
+
+Plans are saved to `docs/plans/YYYY-MM-DD-<feature-name>.md`, written as bite-sized steps with
+exact file paths, real code, and exact commands — no placeholders.
+
+**Every plan header names its PR boundaries** — the pull requests the plan will produce, one
+child issue each. This is where decomposition is decided, because it is the last point at which
+splitting is free: once a branch is finished, the choices are re-slicing completed work or
+reaching for an escape hatch. The staff-engineer review checks the boundaries against the task
+graph, so a human sees "seven PRs" before a line is written. The `PR shape` job enforces the same
+rule at merge time, but it is a backstop, not the decision point.
+
+**The mandatory gate:** every plan gets a **staff-engineer review by a fresh subagent** using
+`planning-reviewer-prompt.md`, and the review is **surfaced to the human before implementation
+starts**. A fresh reviewer has no authorship bias — but it is another instance of the same model,
+so its blind spots correlate with the author's. The human is the only uncorrelated signal, which
+is why the gate exists and why it is not delegated.
+
+**The reviewer sorts its own findings into two buckets**, at the point of writing each one — the
+author can't be trusted to sort them afterwards, having the exact bias the fresh reviewer was
+dispatched to counter.
+
+| Bucket | What lands here | What happens |
+| --- | --- | --- |
+| **Mechanical** | Wrong file paths, name/signature mismatches between tasks, placeholders that slipped the no-placeholders rule, a missing verification step, a missing test for behaviour the plan already commits to | The author **applies it and lists it** in what's surfaced, so the human can audit and reverse it. A finding qualifies only if the reviewer wrote the exact correction. |
+| **Judgment** | Scope, cost, risk posture, architecture, the security invariants (auth, isolation, sandbox), reviewer-vs-author disagreement, anything the reviewer is unsure of | **Escalated and blocking.** The plan is not touched until the human decides. |
+
+**Tie-break: when in doubt, escalate.** A false escalation costs a few seconds of reading; a
+false auto-apply silently changes the plan the human thought they approved. The author may
+demote a mechanical finding to judgment, never the reverse.
+
+This narrows *what reaches* the human; it does not remove the gate. The applied edits are
+recorded in the plan document under `## Plan review log` — the plan is committed and reviewed in
+a PR, so the audit trail outlives the conversation — and **implementation still waits for the
+human**, even when both buckets come back empty.
+
+### 3. Build — *implement in thin, working slices*
+
+**Skills:** `incremental-implementation`, `test-driven-development`, `security-and-hardening`,
+`debugging-and-error-recovery`, `git-workflow-and-versioning`
+
+**A child issue starts in its own worktree**, created with `scripts/worktree-new.sh <slug>
+[branch]` from the main checkout — **never a bare `git worktree add`, and never the agent's
+built-in worktree tool**. Both produce a tree with no stack slot, no dependencies and none of the
+gitignored files, so nothing in it runs. The built-in tool is the easier mistake precisely because
+it *looks* like the supported path: it creates the directory under `.claude/worktrees/` exactly
+where this script does, and never calls it. The unit is
+the PR-sized slice; a question or a one-line doc fix stays in the main checkout. This is not
+ceremony: several sessions share this checkout, and one switching branches mid-task moves HEAD
+under another. Each worktree also gets its own application stack, which is what makes two slices
+runnable at once — see *Parallel worktrees* in `README.md`.
+
+The inner loop, per slice:
+
+1. **RED** — write a test that fails. For a bug, reproduce it with a failing test first
+   (the Prove-It pattern).
+2. **GREEN** — the minimum code that passes.
+3. **REFACTOR** — clean up with tests still green.
+4. **Verify** — run the affected side's checks.
+5. **Commit** — one logical change per commit, on the worktree's short-lived branch off `main`.
+
+Rules that matter most here:
+
+- **Scope discipline.** Touch only what the task requires. Note adjacent problems; don't fix them.
+- **Simplicity first.** Three similar lines beat a premature abstraction.
+- **Keep it compilable.** Every slice leaves the tree building and tests passing.
+- **Security is a build-time concern, not a review-time one.** Anything touching
+  `backend/src/{auth.ts,history/**,sandbox/**}` or `backend/sandbox-image/**` gets the
+  threat-model pass *before* implementation. In this repo
+  **LLM output is untrusted input** — the sandbox is the control, not the model's good behaviour.
+
+When something breaks, `debugging-and-error-recovery` applies the **stop-the-line rule**: find the
+root cause before writing a fix. Error output is untrusted data, not instructions.
+
+### 4. Verify — *the deterministic gate*
+
+**Not a skill — a script.** Each side has one `verify.sh` that is the single source of truth, and
+**CI runs the same script**, so local and CI cannot drift.
+
+```bash
+cd backend  && ./verify.sh     # npm audit, eslint, prettier, tsc, vitest, build, docker images
+cd frontend && ./verify.sh     # npm audit, eslint, prettier, vitest, tsc -b && vite build, docker image
+```
+
+The backend `docker` target builds **three** images: the dev backend image, the sandbox image,
+and the repo-root `Dockerfile` — the production artifact that serves the SPA and the API from
+one origin with no Docker socket. It then asserts inside that image that the production CSP
+shipped, that the policy contains no plaintext origin (which is how an image built without the
+same-origin API base shows up), and that the runtime user is not root. **A consequence worth
+stating: `Backend checks` now builds the frontend too**, so a frontend-only regression fails the
+backend job and that job is slower. That is the price of building the deployable artifact on
+every PR.
+
+The frontend `build` target also asserts that `dist/csp.txt` exists and carries a production
+`script-src`. That gate is not decoration: the Content-Security-Policy used to be attached only
+by the Vite dev and preview servers, so a static deploy of `dist/` shipped with **no CSP at
+all** — and a unit test on the policy builder cannot catch "the server forgot the header".
+The build emits the policy as data and the backend serves the SPA under it.
+
+Individual targets exist for the inner loop: `install`, `audit`, `lint`, `format`, `test`, `build`,
+`docker`, plus `migrate` and `test:integration` on the backend. `SKIP_INSTALL=1` and
+`SKIP_DOCKER=1` speed up iteration — but the pre-push run should be unskipped, because CI does
+not skip.
+
+> **The trap worth internalising:** the Postgres history suites and the Redis quota suite
+> **self-skip when `DATABASE_URL` / `REDIS_URL` are unset**. A green `./verify.sh` is *not*
+> evidence they ran. Touching `src/history/**`, `migrations/**`, or `src/limits/**` means
+> running `DATABASE_URL=… REDIS_URL=… ./verify.sh test:integration` explicitly. The gate now
+> runs when *either* variable is set and prints which half is self-skipping — a partial run is
+> better than none, but it is not full coverage.
+
+### 5. Review — *two mandatory passes, then reasoned reception*
+
+Never skipped because a change "looks small."
+
+| Pass | Skill | Scope |
+| --- | --- | --- |
+| Code review | built-in `code-review` | correctness, reuse, simplification, efficiency |
+| Security review | built-in `security-review` | the pending diff's security posture |
+| Reception | `receiving-code-review` | evaluate each finding **before** implementing it |
+
+`receiving-code-review` is the part people skip, and it's the one that keeps quality up:
+verify each finding against the codebase, push back with technical reasoning when a finding is
+wrong, and fix what's real. Findings are suggestions to evaluate, not orders to follow.
+
+### 6. Merge — *CI is the gate*
+
+Trunk-based: short-lived branches off `main`, small and frequent PRs, branch deleted after merge.
+The "Protect main" ruleset requires the CI status checks by **job name** before a merge is allowed.
+
+A PR closes **one** child. The `PR shape` job counts the closing references in the PR body and
+fails above one; `[multi-child]` in the title is the visible exception. A PR that closes no issue
+— a docs fix, a dependency bump — passes untouched.
+
+### 7. Document — *record the why*
+
+**Skill:** `documentation-and-adrs`
+
+- **ADRs** → `docs/adr/NNNN-kebab-title.md`, continuing the existing sequence. Write one for any
+  decision that would be expensive to reverse. Never delete an old ADR; supersede it.
+- **README** → updated *in the same change* when a change alters commands, layout, verification
+  steps, security posture, or the roadmap. Keep the judgment tight — internal refactors don't
+  touch it.
+- **This file** → updated when the process itself changes (enforced; see below).
+
+[`docs/README.md`](README.md) indexes every subfolder here — what each holds, when to write one,
+and whether it's mutable.
+
+---
+
+## How this meets CI/CD
+
+CI is not a separate process — it is the same `verify.sh` the developer already ran, executed
+where it cannot be skipped.
+
+```
+ developer                          GitHub Actions
+ ─────────                          ──────────────
+ ./verify.sh  ───── same script ──▶  Backend checks   (audit→install→lint→format→test→build→
+                                                       integration→docker)
+                                     Frontend checks  (audit→install→lint→format→test→build→docker)
+                                     Terraform checks (selftest→fmt→init→validate→gates)
+                                     SDLC docs        (process changes must update docs/sdlc.md)
+                                     PR shape         (a PR closes at most one child issue)
+                                            │
+                                            ▼
+                                     "Protect main" ruleset
+                                     required checks must pass
+```
+
+Details that are easy to get wrong:
+
+- **Job `name:` values are a contract.** The ruleset requires `Backend checks`,
+  `Frontend checks`, `Terraform checks`, `SDLC docs` and `PR shape` by name. Renaming or removing a job silently
+  blocks all merges until the ruleset is updated to match. Change what runs *inside* a job
+  freely; keep the name stable, or update the ruleset in the same PR.
+- **Never add a CI check without adding it to the matching `verify.sh`, or vice versa.** That
+  mirroring is what stops local and CI drifting apart. Two jobs are deliberate exceptions, both
+  metadata-level: `SDLC docs` diffs a PR against its base, and `PR shape` reads the PR body —
+  neither has a meaningful single-working-tree equivalent. Both live in their own workflows so
+  they can listen for `pull_request: edited` without re-running the full suites on every
+  PR-title change. Both jobs' *unit tests* do have a local equivalent, and it is the same file
+  CI runs: `./scripts/tests/check-pr-shape.test.sh` and
+  `./scripts/tests/check-sdlc-sync.test.sh`.
+
+  Further suites are run by `SDLC docs` even though they belong to other workflows:
+  `./scripts/tests/dependabot-auto-merge-disarm.test.sh`,
+  `./scripts/tests/deploy-cloud-run.test.sh` and
+  `./scripts/tests/verify-deployment.test.sh`. Each belongs to a workflow that gates itself so a PR
+  editing it never executes it — `dependabot-auto-merge.yml` to `dependabot/npm_and_yarn/*`
+  branches, and the deploy workflow (Phase 3) to pushes on `main` — so the tests would have no host
+  otherwise. Same file locally and in CI, like the two above. See
+  [Auto-merging dependency bumps](#auto-merging-dependency-bumps).
+- **Dependabot PRs are exempt from `SDLC docs`, and need no exemption from `PR shape`.** The
+  first is because `github-actions` bumps touch watched workflow files; the second is because
+  bot PRs close no issue and the rule is *at most* one. If someone proposes an actor exemption
+  for `PR shape`, that is a sign the rule drifted — see
+  [One child per PR](#one-child-per-pr).
+- **One workflow is not a check: `Dependabot auto-merge`.** It runs on every pull request but
+  does nothing unless the author is `dependabot[bot]`, and all it does then is press "enable
+  auto-merge" on patch and minor bumps. The four required checks still decide whether the PR is
+  mergeable. It is therefore **not** in the ruleset's required checks and **not** subject to the
+  `verify.sh` mirroring rule above — that rule binds gates, and this gates nothing. It also holds
+  the only writable `GITHUB_TOKEN` in this repository's CI, which is why it checks nothing out;
+  see [Auto-merging dependency bumps](#auto-merging-dependency-bumps).
+- **CI splits `verify.sh` into named steps** (Audit / Install / Lint / Format / Test / Build / …) purely
+  so each gets its own pass/fail and timing in the log. That is presentation, not a second
+  definition of the checks.
+- **The `Audit` step fails on high and critical advisories only.** `npm audit --audit-level=high`,
+  the same command locally and in CI. Moderate and below stay visible in the output and are
+  Dependabot's job; blocking every merge on a moderate transitive advisory buys noise rather than
+  safety. It reads the lockfile, so `SKIP_INSTALL=1` does not weaken it.
+
+  **Two flags close environment-driven bypasses, and both were found by review rather than by the
+  gate noticing.** `--no-offline`, because `npm_config_offline=true` otherwise makes `npm audit`
+  report "found 0 vulnerabilities" and exit 0. `--include=dev`, because `npm audit` honours the
+  `omit` config and both `npm_config_omit=dev` and `NODE_ENV=production` set it, silently dropping
+  every dev-dependency advisory — the scope this gate claims. Counting the `|| true` rejected at
+  design time, that is three bypasses of one class: `npm audit` is configurable from the
+  environment in several ways, and all of them fail **open**. State the intent in flags rather
+  than inheriting whatever the environment says. Scope is every dependency, dev included: neither image ships
+  devDependencies, but they execute in CI. It runs FIRST in `all`, before `npm ci`: that command
+  executes dependency lifecycle scripts, so auditing afterwards would let a package with a known
+  install-time vulnerability run before the gate could reject it. The cost is that a registry
+  outage aborts the pass before the offline checks — reach for a single target then.
+
+  It is a **hard fail, not `|| true`**. A check that cannot fail is the decorative-assertion
+  pattern this repo has already shipped once and had to fix — it reads as coverage and provides
+  none. When a high advisory lands with no upstream patch, the honest response is an explicit,
+  dated exception in the `audit()` function, where review can see it; not a permanently green
+  check. The threshold is a judgment call, so it is written down here rather than left in a flag.
+- **Postgres and Redis run as service containers**, and only the `Integration test` step sets
+  `DATABASE_URL` / `REDIS_URL` — which is exactly why the service-free `Test` step still skips
+  those suites.
+- **Every `docker build` passes `--pull`.** Without it Docker reuses whatever base image is
+  cached locally, so the identical script yields different artifacts on two machines: CI starts
+  from a cold cache and gets the current `node:22-slim`, a developer's laptop can be months behind
+  and still report green. That is drift arriving through the *inputs* rather than the commands —
+  the one gap the single-`verify.sh` design does not otherwise close.
+
+  It narrows that gap rather than eliminating it, and the difference is deliberate. These are
+  **mutable tags**, re-resolved independently at each build, so two builds still differ if upstream
+  republishes between them. Only digest pins would make the two provably identical, and they turn
+  every upstream rebuild into a PR. The residual window is upstream-republish timing; the one it
+  replaces was a laptop months behind CI.
+
+  Cost is 0.15s **when the cached digest is current** — a manifest check, not a download. When the
+  tag has moved, `--pull` fetches the changed layers, which is the point. It makes the `docker`
+  target network-dependent, which building an image always was whenever the cache was cold.
+- **Docker builds run on pull requests only**, to keep pushes to `main` fast.
+
+**There is no CD yet.** Deployment is roadmap (GCP Cloud Run); the release and observability
+phases arrive with it.
+
+---
+
+## Where the skills come from
+
+Every skill in `.claude/skills/` is **vendored** — copied in, adapted to this repo, pinned to an
+upstream commit, and reviewed in-diff. No plugin marketplace is wired into this repository,
+nothing is fetched at runtime, and there is no `SessionStart` hook.
+
+Skills are prompts, and prompts are behaviour, so a change to one is a code change: it goes
+through a PR and the gates above.
+
+`.claude/skills/NOTICE.md` is the record — both upstreams, their pinned commits, the local
+modifications, and **which upstream skills were rejected and why**. Read it before adding one
+back; some were excluded because they actively conflict with the CI design described above.
+
+---
+
+## Changing this SDLC
+
+This file is the contract, and it is enforced deterministically rather than by good intentions.
+
+**The rule:** a PR that touches any of
+
+- `.claude/skills/**`
+- `backend/verify.sh`, `frontend/verify.sh` or `infra/verify.sh`
+- The production-image assertions in `backend/verify.sh` also require a `python3` interpreter in
+  the image, because a Cloud Run sandbox executes against the application image's own filesystem.
+  That assertion names the interpreter by its **absolute** path, `/usr/bin/python3`, and must keep
+  doing so: a Cloud Run sandbox inherits no environment, so `PATH` inside it is empty and a bare
+  command name resolves against nothing. A `python3` or `command -v python3` check runs in a shell
+  that *has* a `PATH`, passes, and proves only that the packaging is right — which is how #185
+  reached a deployed service through a fully green gate. A check that cannot fail the way
+  production fails is not a gate
+- `infra/tests/**` — the self-tests `infra/verify.sh` runs first: the gates, and `bootstrap.sh`
+  against a fake `gcloud` (a live run proves the script worked that day, not that the next edit is safe)
+- `.github/workflows/**`
+- `scripts/**`
+
+must also touch `docs/sdlc.md`.
+
+That last entry is deliberate: this document describes the exact semantics of the checks in
+`scripts/` — their watched paths, failure messages and escape hatches — so a change to one that
+skipped the doc would leave the two silently disagreeing.
+
+`scripts/` also holds **developer tooling that is not a CI check**: `scripts/worktree-new.sh`
+creates a git worktree with its own application stack. The watched-path rule covers it too, and
+that is the right outcome rather than an accident — the stack-slot contract it encodes (which
+ports a slot owns, and the Auth0 origins that bound the pool) is process. A change to it that
+skipped the docs would leave `README.md`'s slot table and `backend/src/config.ts`'s
+`stackSlotWarnings()` describing a scheme the script no longer implements.
+
+Its unit tests, `scripts/tests/worktree-new.test.sh`, run **locally only** — CI never creates a
+worktree, so there is nothing there for them to protect. That is why they are absent from the two
+jobs named above, and why they are **not** an exception to the `verify.sh` mirroring rule: there
+is no CI check to mirror. Run them before pushing a change to the script.
+
+`scripts/deploy-cloud-run.sh` is the other piece of tooling here that is not a CI check. It holds
+the `gcloud beta run deploy` command that
+[ADR-0005](adr/0005-cloud-run-service-outside-terraform.md) makes the Cloud Run service's
+*specification* — the provider does not model `sandboxLauncher` and strips it on every apply, so the
+service is deployed by this command rather than by Terraform. A human runs it from
+[`docs/runbooks/gcp-deploy.md`](runbooks/gcp-deploy.md); the deploy workflow will run the same
+targets. That is the same "one definition, two callers" contract the `verify.sh` scripts have, and
+it is why the command is not written out twice.
+
+Three things about it are process rather than implementation, which is why they are here:
+
+- **It reads no Terraform state, ever.** State holds the generated Cloud SQL password in cleartext,
+  so a pipeline that could read it would hold the database password. Every project-specific value is
+  instead derived from the resource names Terraform itself uses, which means a rename in `infra/`
+  breaks the deploy loudly on the next run rather than silently.
+- **Its exit codes are an interface.** `0` success, `3` nothing to deploy — the environment is torn
+  down between working sessions, or the service does not exist yet — `2` a usage error, `1`
+  everything else *including a credential that does not work*. That last distinction is the point:
+  a probe that reported a bad token as "torn down" would finish green. Two consequences follow, and
+  both are enforced rather than intended. The existence probe is `gcloud run services list
+  --filter`, not `describe`, because list exits 0-with-no-output for a missing service and non-zero
+  only for a real failure, while `describe` fails identically for "missing" and "permission
+  denied". And a child process's exit status is **normalised to 1** — the verification script has
+  its own exit vocabulary, and passing its `3` straight through would tell the workflow there was
+  nothing to deploy.
+- **"Is there an environment?" asks about the DATA LAYER, not the registry.** The between-sessions
+  teardown is a targeted destroy of the billable resources only, so the Artifact Registry
+  repository, the service accounts and the secret containers all survive it — their presence proves
+  nothing. The probe is the Cloud SQL instance, which that teardown does remove and without which
+  the service cannot work. A change to what the session-end teardown destroys is therefore a change
+  to this script's premise, which is why both live in this document.
+- **The default target is `help`, not `all`.** Every other target changes production, so the thing
+  that happens when someone types the script's name to see what it does must not be a deploy.
+- **It will not create the service.** Cloud Run gives a brand-new service's first revision 100% of
+  traffic, so it cannot be verified before users reach it. Creating the service is a separate
+  `create` target, run by hand after a rebuild; automation only ever deploys a revision that serves
+  nobody until it has been checked.
+
+`scripts/verify-deployment.sh` is its companion, and the answer to a question the deploy script
+cannot answer for itself: what does a pipeline owe beyond "the command exited 0"? It reads the
+deployed service back from the API and asserts its shape against the deploy runbook's flag list —
+`sandboxLauncher`, gen2, the VPC interfaces, the Cloud SQL instance, the runtime identity,
+concurrency 8, `FRONTEND_ORIGIN` equal to the service URL, all six secret bindings — then checks the
+endpoints an anonymous caller can reach and the application's own log window.
+
+Two limits are written into it rather than left for a reader to discover. Nothing behind the auth
+gate is covered: a real execution, the cross-owner 404 and the quota's 429 all need an authenticated
+caller, and [`gcp-isolation-probes.md`](runbooks/gcp-isolation-probes.md) stays the authority for
+those. And **an empty log window is weak evidence**, because Cloud Logging ingestion is asynchronous
+and empty is exactly what the check treats as a pass — a settle wait buys some of that back without
+making silence proof.
+
+Its unit tests, `scripts/tests/deploy-cloud-run.test.sh` and
+`scripts/tests/verify-deployment.test.sh`, drive their scripts against fake `gcloud`, `docker`,
+`curl` and verifier executables on `PATH` — no project, no credentials, no network. They are hosted by the
+`SDLC docs` job for the same reason `dependabot-auto-merge-disarm.test.sh` is, and like the other
+lodgers **the same files are the local pre-push commands**: run
+`./scripts/tests/deploy-cloud-run.test.sh` and `./scripts/tests/verify-deployment.test.sh` before
+pushing, because no `verify.sh` covers them and the
+three that exist will stay green while this job goes red.
+
+One consequence of that tooling reaches the `verify.sh` scripts. Docker image tags are
+daemon-wide, and `backend/verify.sh`'s `docker` target *builds* a tag and then *runs* it. With two
+worktrees verifying at once a fixed `…:verify` tag lets one tree's assertions execute the other
+tree's image — a pass or fail belonging to a different branch. `backend/verify.sh` and
+`frontend/verify.sh` therefore derive their throwaway tags from the checkout's directory name
+(`verify-<dirname truncated>-<cksum of the full path>` — the basename alone is neither unique, since
+a worktree may share it with the main checkout, nor bounded against Docker's 128-character tag
+limit), which is unique per worktree and deterministic in CI. `infra/verify.sh`
+needs no equivalent: it builds no image.
+
+**The enforcement:** the `SDLC docs` job — in its own workflow, `.github/workflows/sdlc-docs.yml`
+— runs `scripts/check-sdlc-sync.sh`, which diffs the PR against its base and fails with a message
+naming the files that changed. Pull requests only, since it needs a base to compare against.
+
+It resolves that base from the **merge ref's first parent**, not the event payload's `base.sha`.
+Those differ once `main` advances mid-PR, and the payload version would drag in commits the PR
+author never touched — failing PRs over someone else's files, and passing PRs whose `docs/sdlc.md`
+was updated by a different change.
+
+**Escape hatch:** for a genuine no-op — a typo fix in a skill, a comment reflow — put
+`[skip-sdlc-sync]` in the PR title. That's deliberately visible in the PR list rather than a
+silent bypass. The workflow listens for `pull_request: edited` so that editing the title
+actually re-runs the check; without that type the hatch would be documented but unusable.
+
+**Dependabot is exempt.** The `github-actions` ecosystem bumps `uses:` pins inside
+`.github/workflows/*.yml` — a watched path — so without an exemption every action update would
+fail a required check that a bot can never satisfy. `scripts/check-sdlc-sync.sh` exits 0 when
+`PR_ACTOR` is exactly `dependabot[bot]`. A pin bump is not a process change.
+
+That exemption is an early `exit 0` **inside the script**, not a job-level `if:` — and the reason
+is worth stating precisely, because the intuitive one is wrong. A job skipped by an `if:` does
+**not** block a required check: GitHub reports it as *Success* and it satisfies the requirement.
+The case that hangs a merge forever is a workflow-level `paths:` or `branches:` filter, where the
+check never reports at all.
+
+The actual reasons are narrower. A job-level `if:` would skip the `Self-test` step too, so the
+suite guarding the exemption would not run on the very PRs the exemption exists for. And a
+skipped job says nothing in the checks list, where this prints why it passed — which matters for
+a bypass, the one outcome you want to be able to see.
+
+Both early exits are covered by `scripts/tests/check-sdlc-sync.test.sh`, which the job runs as
+its first step and which is also the local pre-push command. The base-resolution logic below
+them is not covered — it needs git fixtures, and no change has yet warranted building them.
+
+To take an upstream skill update: re-vendor the file, update the pinned commit in
+`.claude/skills/NOTICE.md`, re-apply the local modifications listed there, and open a PR. The
+prompt diff gets reviewed like code, because that is exactly what it is.
+
+### Auto-merging dependency bumps
+
+`.github/workflows/dependabot-auto-merge.yml` arms GitHub's native auto-merge on Dependabot PRs
+where **every** dependency is a patch or minor bump. Majors are always merged by a human, because
+a major is where a peer range breaks — #78 raised `vite` without `@vitejs/plugin-react` and died
+at `npm ci`.
+
+Four details in that rule are not decoration:
+
+- **Every dependency, not the PR's highest reported update type.** On security updates Dependabot
+  omits `update-type:` from the commit trailer, so the action falls back to parsing versions out
+  of the PR body and yields nothing for an entry it cannot parse — #78's `esbuild` line reads
+  "Removes `esbuild`". The summary output is the *max* across entries and skips those blanks, so a
+  security PR whose only major is an unparseable entry reports minor. The gate reads the
+  per-dependency JSON instead and fails closed on a blank, a missing key or malformed input.
+- **An allow-list of ecosystems, not a deny-list, and it is applied *before* any step runs.** Only
+  `npm_and_yarn` auto-merges. `github_actions` must not: the workflow pins its own action by SHA
+  with the version in a trailing comment, and Dependabot bumps SHA pins by that comment, so a new
+  third-party action SHA would arrive as a *patch* and merge unread — and `SDLC docs` exits 0 for
+  `dependabot[bot]` while no `verify.sh` reads workflow files. An allow-list also fails closed on
+  ecosystems added later, which is not hypothetical: `docker` was added in #110 and is ineligible
+  by construction, with no exclusion rule to write or remember. That matters most for
+  `backend/sandbox-image/`, the containment boundary around LLM-generated code — a base image
+  there must never merge unread.
+
+  The check lives in the **job-level `if:`**, on `github.head_ref`, not in the gate that reads the
+  action's output — and that placement is the whole point. For `pull_request` the workflow file is
+  read from the merge ref, so a Dependabot PR bumping this workflow's own `fetch-metadata` pin
+  would execute the *replacement* action under the job's writable token and only afterwards reach
+  a gate that rejects it. Any rule that depends on metadata the third-party action produces is too
+  late by construction. The gate repeats the check as defence in depth.
+- **One commit, or nothing.** `fetch-metadata` verifies the PR author and then reads and
+  signature-checks only `commits[0]`; auto-merge merges HEAD. Requiring a single commit closes the
+  gap between what was inspected and what would merge. Every Dependabot PR this repository has
+  seen carries exactly one commit, so the rule costs nothing.
+- **Arming is undone when a PR stops qualifying — but only what the workflow itself armed.**
+  GitHub disables auto-merge only when someone *without* write permission pushes to the head
+  branch, and Dependabot has write. A grouped PR armed while patch-only and later updated in place
+  to carry a major would otherwise stay armed and merge that major unattended, so the workflow
+  calls `gh pr merge --disable-auto` on an already-armed PR that no longer qualifies.
+
+  It decides whose arming it is from **both** `autoMergeRequest.enabledBy.is_bot` and the login,
+  and **fails closed** when it cannot tell. `allow_auto_merge` is repository-wide, so a human can
+  read a major and arm it by hand, and silently revoking that would be its own defect.
+
+  Each half of that rule cost a defect to learn. Keying on the **login alone** failed: the first
+  version compared it against `github-actions[bot]` and never matched, because `gh` renders a Bot
+  actor as `app/github-actions` while the underlying GraphQL `Bot.login` is bare `github-actions`
+  — so every bot-armed PR read as "a human did this, leave it alone". Keying on **`is_bot` alone**
+  fails the other way: it matches *any* app, so a maintainer who runs `@dependabot merge` on a
+  major after reading it would be silently overridden. And `enabledBy` is a **nullable** Actor —
+  a deleted account, an uninstalled app — so `is_bot` can be *absent* rather than false; a bare
+  `// false` would read absent as "human" and leave an ineligible PR armed. The check tests
+  `is_bot | type == "boolean"`.
+
+  When it comes back indeterminate the step **disarms anyway**, then fails the job. Exiting
+  without disarming would not be failing closed, which is what an earlier version called it: this
+  workflow is deliberately not a required check, so a red job blocks nothing and the PR would stay
+  armed and merge. Refusing to act is fail-*open* with a red light nobody has to obey. Revoking a
+  possible human decision is visible and one click to undo; an unattended merge of an ineligible
+  PR is neither.
+
+  Its tests are `scripts/tests/dependabot-auto-merge-disarm.test.sh`, ten cases, run by the
+  **`SDLC docs`** job. That job is a host, not the owner: this workflow gates itself to
+  `dependabot/npm_and_yarn/*` branches, so a PR that edits it never executes it, and the logic
+  would otherwise ship with no automated coverage — which is how a wrong actor constant survived
+  two reviews. `SDLC docs` already has a checkout and a read-only token, runs on every PR, and
+  exists to check that a process change is self-consistent.
+
+  The test extracts the script from the YAML rather than keeping a copy, so the two cannot drift,
+  and stubs `gh` in a way that still runs the real `--jq` expression over payloads captured from
+  real `gh` output. A hand-written stub can only encode what its author already believes, which is
+  exactly how `github-actions[bot]` got past review.
+
+**An auto-merge will re-run `CI` on `main`, and trigger `Deploy` — it did neither before Phase 3,
+and it does neither until the App below is created.**
+A `push` or `pull_request` event triggered by `GITHUB_TOKEN` does not start a new workflow run
+(`workflow_dispatch` and `repository_dispatch` are the documented exceptions), and auto-merge armed
+with that token merges as `app/github-actions`. Confirmed on the first unattended merge: `8211ee8`
+(PR #117) has no `push`-side CI run, while every human-merged commit around it does.
+
+That was harmless while nothing keyed off "CI ran on main", and this document said so — adding that
+**anything built later that keys off it must not assume otherwise**. Phase 3's `Deploy` workflow is
+that later thing, and it keys off exactly that: an auto-merged security patch would have reached
+`main` and never been deployed, silently, until the next human push.
+
+The fix is at the source rather than routed around. The `apply` job mints a **GitHub App
+installation token** — an hour-lived credential, from an app holding `contents: write` and
+`pull-requests: write` on this repository alone — and merges with that instead of `GITHUB_TOKEN`.
+An App pushes as a first-class actor, so both gaps close at once and Dependabot stops being a
+special case in any respect — **once the App exists**. Until its credentials are present the mint
+step fails, the arm step is skipped, and auto-merge simply does not happen; the disarm path keeps
+working, because it deliberately uses `GITHUB_TOKEN` rather than the App token.
+
+**What the App is, so this is recoverable without reading a merged pull request.** A GitHub App
+installed on this repository alone, holding `contents: write` and `pull-requests: write` and
+nothing else, with no webhook. Three repository settings feed it, and the first two are
+**Dependabot** secrets rather than Actions secrets — `pull_request` events raised by Dependabot are
+not given Actions secrets, and the two stores look identical in the UI:
+
+| Setting | Store | Why |
+| --- | --- | --- |
+| `AUTOMERGE_APP_CLIENT_ID` | Dependabot secret | the App's Client ID. `app-id` is deprecated in the action. |
+| `AUTOMERGE_APP_PRIVATE_KEY` | Dependabot secret | the App's private key, in PEM form. |
+| `AUTOMERGE_APP_SLUG` | Actions **variable** | the App's slug, so the disarm step can recognise this workflow's own arming even on runs where minting failed. |
+
+Rotating the key means replacing `AUTOMERGE_APP_PRIVATE_KEY`; nothing else changes. `gate` is untouched and keeps `GITHUB_TOKEN` at `pull-requests: read`,
+so the two-job scope split is unchanged.
+
+**The disarm path deliberately does NOT use the App token**, and that asymmetry is the load-bearing
+part. Disarming is the only mechanism that un-arms an ineligible PR, and this workflow is not a
+required check — so a red job blocks nothing. Routing it through a credential that can be absent,
+rotated or unreachable means a run where minting failed leaves the PR armed and merges it: fail-open
+with a red light nobody has to obey. It keeps `GITHUB_TOKEN`, which is always present. Only the arm
+path needs App identity, because only the arm path produces the push that must fire `CI` and
+`Deploy`.
+
+That asymmetry has a consequence the disarm step has to handle: it must know **which login means
+"this workflow armed it"** even on the runs where minting failed, which is why `AUTOMERGE_APP_SLUG`
+is a plain Actions variable rather than read from the mint step alone. Guessing instead — treating
+any unrecognised bot as ours — would revoke a maintainer's deliberate `@dependabot merge`, and the
+disarm suite fails if you try it.
+
+A long-lived fine-grained PAT would also have worked and was rejected — but not for the reason
+that first suggests itself, and the distinction is worth recording because the wrong version of it
+would lead someone to under-protect the key. **The App private key is also a standing repository
+secret**: it does not expire, it mints write-scoped tokens on demand, and revoking it means
+regenerating the key rather than deleting a token. What the App actually buys over a PAT is that it
+is scoped to this one repository rather than to a user's whole account, that the tokens it mints
+are hour-lived and narrowed at mint, and that it is not tied to an individual who might leave. Those
+are sufficient; "no standing credential" is not true of either. The gap in `main`'s push-side history before
+this change is real and stays in the record.
+
+**What it is not.** It does not weaken any gate. Native auto-merge waits for all four required
+checks *and* for every review thread to be resolved. Copilot reviews every PR including
+Dependabot's, so a single inline comment parks the merge until someone answers it. That is the
+intended behaviour and was chosen deliberately over dropping
+`required_review_thread_resolution` (issue #94): the feature is "auto-merge when nothing
+objects", not "unattended merges". A parked PR is a correct outcome, not a bug to design around.
+
+**Why it does not update stale branches.** `strict_required_status_checks_policy` is on, so a
+merge to `main` leaves every other open PR out of date, and auto-merge will not update a branch
+itself — that is what a merge queue is for. For Dependabot PRs the update arrives from Dependabot,
+which rebases its own PRs by default and gives up after 30 days. The queue therefore drains on
+Dependabot's cadence rather than instantly. If that becomes the bottleneck, the fix is a merge
+queue, not dropping `strict` — but note that the built-in `GITHUB_TOKEN` cannot add a pull request
+to a merge queue, so adopting one means re-authenticating this workflow with a PAT or a GitHub App
+token.
+
+**Security posture — different from every other job here.** `SDLC docs` and `PR shape` run
+scripts from the PR branch under a read-only token. This workflow inverts that: it holds
+`contents: write`, and so it checks nothing out and runs no repository code. It uses
+`pull_request`, never `pull_request_target`.
+
+**It is two jobs, and the split is the point.** `gate` runs `dependabot/fetch-metadata`, pinned to
+a full commit SHA, under `pull-requests: read`, and publishes a verdict as a job output. `apply`
+holds `contents: write`.
+
+`apply` used to run nothing but `gh`, and since the auto-merge moved to a GitHub App it also runs
+`actions/create-github-app-token` — so the write-scoped job now does execute third-party code, and
+saying otherwise would misdescribe the posture. It is GitHub's own action, SHA-pinned, and it mints
+a token whose permissions are narrowed at mint rather than inherited from the installation. What
+the split still buys is that the *metadata* action, whose output the gate depends on, never sees
+write scope.
+In a single job the write scope would be handed to the third-party action, leaving the SHA pin as
+the only thing between a compromised release and a push to `main`. The split turns that
+supply-chain assumption into a scope boundary; the pin stays as defence in depth.
+
+`contents: write` was first shipped omitted, on the reasoning that `gh pr merge --auto` only
+*enables* auto-merge and GitHub performs the merge later. The first real run disproved it:
+`Resource not accessible by integration (enablePullRequestAutoMerge)`, and the same on
+`disablePullRequestAutoMerge`. Those runs prove `pull-requests: write` alone is insufficient; that
+`contents` is the scope that closes it comes from GitHub's documented example. Do not narrow it
+again without a run to point at.
+
+**Two `if:` details that are load-bearing, not style.** A step or job `if:` without a status
+function is implicitly ANDed with `success()`, so the disarm path carries `!cancelled()` — if
+`gate` fails, its verdict is empty, which is not `eligible`, and the one mechanism that un-arms a
+PR must still run. And GitHub invokes `run:` steps as `bash -e {0}`, so `set -uo pipefail` does
+**not** clear errexit; the disarm step says `set +e` explicitly because it handles its own `gh`
+failures.
+
+---
+
+## One child per PR
+
+`docs/sdlc.md` has always said a PR is "one change, closing a child". It drifted on its first
+real test — #71 closed all seven children of epic #62 in one 1,362-line change — so the rule
+moved out of the instruction layer.
+
+**The rule:** a PR body may contain closing references (`Closes`, `Fixes`, `Resolves`, and their
+tenses) to **at most one** issue. Zero is fine — a docs fix or a dependency bump closes nothing.
+
+**The enforcement:** the `PR shape` job — in its own workflow, `.github/workflows/pr-shape.yml` —
+runs `scripts/check-pr-shape.sh`, which strips HTML comments and fenced blocks from the body,
+folds all three GitHub reference forms (`#N`, `owner/repo#N`, the issue URL) to one canonical
+form, deduplicates, and fails above one. Quoting another PR's body is therefore safe as long as
+the quotation sits in a fence. Its unit tests are `scripts/tests/check-pr-shape.test.sh`; the job
+runs that file as its first step, and it is also the local pre-push command.
+
+**Escape hatch:** put `[multi-child]` in the PR title. Visible in the PR list, exactly like
+`[skip-sdlc-sync]`.
+
+**Why *at most* one and not exactly one.** Exactly-one would also catch a PR that batches
+children while writing no `Closes` line at all — but it would need a second marker on every PR
+that legitimately closes nothing (~30% here) and an actor exemption for `dependabot[bot]`, whose
+titles are rewritten on every rebase. The concealment it guards against has no precedent here:
+#71 declared all seven closing references openly. A backstop should be dumb.
+
+**It is a discipline backstop, not a security control.** On `pull_request` the workflow and the
+script both come from the PR's head, so a fork PR can edit the gate to pass itself — the same
+posture as `SDLC docs`. Both jobs hold a read-only token and reach no secrets. Do not build
+anything on the assumption that either is tamper-proof.
+
+**Where the real decision is made:** the `PR boundaries` field in the plan header (see
+[Plan](#2-plan--what-are-the-ordered-verifiable-steps)). This check is what happens when that
+decision is not honoured.

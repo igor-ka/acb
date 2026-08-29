@@ -1,0 +1,412 @@
+name: Dependabot auto-merge
+
+# Arms GitHub's native auto-merge on Dependabot PRs that only move patch or minor versions.
+# See "Auto-merging dependency bumps" in docs/sdlc.md, and issue #94.
+#
+# This is NOT a check and must never be added to the "Protect main" ruleset's required status
+# checks. The four gates (Backend checks, Frontend checks, SDLC docs, PR shape) still decide
+# whether the PR is mergeable; this workflow only presses the button in advance. It is therefore
+# also not subject to the "every CI check has a verify.sh equivalent" rule — it gates nothing.
+#
+# Why `pull_request` and NOT `pull_request_target`: pull_request_target runs in the base repo's
+# context with a writable token, which is the standard way to turn a dependency bot into a
+# code-execution path. It is not needed here — Dependabot's branches live in this repository, so
+# a plain `pull_request` run can be granted write via a `permissions:` block.
+#
+# Why there is no `actions/checkout` step anywhere: `apply` below holds the only writable
+# GITHUB_TOKEN in this repository's CI. Checking out the head ref would put code from the PR
+# branch inside it. Every input either job needs arrives as event metadata or as an action
+# output, so neither needs a working tree. If a future change needs the repository, check out
+# `${{ github.event.pull_request.base.sha }}`, never the head.
+#
+# WHY TWO JOBS. `gate` runs the one third-party action under a read-only token and publishes a
+# verdict; `apply` holds the write scope and runs nothing but `gh`. They are split because
+# `contents: write` turned out to be mandatory (see `apply`), and in one job that scope would be
+# handed to `dependabot/fetch-metadata` — making the SHA pin the only thing standing between a
+# compromised action release and a push to `main`. The split turns a supply-chain assumption into
+# a scope boundary. The SHA pin stays, as defence in depth rather than the load-bearing control.
+
+on:
+  pull_request:
+    branches: [main]
+    # `synchronize` matters: Dependabot rebases its open PRs when main moves, and that rebase is
+    # the event that runs this workflow for a PR opened before it existed. (The workflow file is
+    # read from the merge commit, so the PR branch does not have to contain it — it just needs an
+    # event.)
+    #
+    # `reopened` is deliberately dropped from the default set. Check results are keyed to the head
+    # SHA and survive a close/reopen, so reopening a PR whose checks are already green and whose
+    # threads are resolved would run this against an immediately-mergeable PR — and
+    # `gh pr merge --auto` errors in that state ("Pull request is in clean status"). A human who
+    # reopens a PR can merge it themselves.
+    types: [opened, synchronize]
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Dependabot auto-merge (gate)
+    runs-on: ubuntu-latest
+    # `github.repository` keeps this inert in forks. `user.login` is set by GitHub from the
+    # authenticated actor and cannot be forged by a PR author.
+    #
+    # The branch-prefix test is the ecosystem allow-list, hoisted to where it runs BEFORE any
+    # step does. It has to be here, not in the jq rules below: for `pull_request` the workflow
+    # file is read from the merge ref, so a Dependabot PR that bumps this file's own
+    # `fetch-metadata` pin would run the *replacement* action, and only afterwards reach a rule
+    # that rejects the `github_actions` ecosystem. Rejecting on metadata the action itself
+    # produces is too late by construction. `github.head_ref` is event data, available before the
+    # first step, and Dependabot always names branches `dependabot/<ecosystem>/…`. Verified live
+    # on PR #98 (`dependabot/github_actions/…`), run 31434426736: both jobs report `skipped`, so
+    # `fetch-metadata` never executed. Note a job-level `if:` still *creates* a workflow run — it
+    # suppresses the jobs, not the run.
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.repository.fork == false &&
+      startsWith(github.head_ref, 'dependabot/')
+    # Read-only. This is the job that runs third-party code.
+    permissions:
+      pull-requests: read
+    outputs:
+      verdict: ${{ steps.gate.outputs.verdict }}
+    steps:
+      # The ecosystem allow-list. It runs BEFORE dependabot/fetch-metadata, which is the security
+      # requirement the job-level `if:` used to carry: on `pull_request` the workflow is read from
+      # the merge ref, so a `dependabot/github_actions/…` PR bumping the pin below would otherwise
+      # execute the REPLACEMENT action and only then reach a rule rejecting it.
+      #
+      # It reads a repository VARIABLE, not .acb.json, and that is deliberate. This workflow has no
+      # `actions/checkout` anywhere (see the header): `apply` holds the only writable token, and
+      # checking out the head ref would put PR-branch code inside it. With no working tree there is
+      # no file to read, so `acb init` writes the list to `vars.ACB_DEPENDABOT_ECOSYSTEMS` and
+      # `acb status` reconciles it against .acb.json.
+      - name: Check the ecosystem is allowed to auto-merge
+        id: ecosystem
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          ALLOWED: ${{ vars.ACB_DEPENDABOT_ECOSYSTEMS }}
+        run: |
+          set -euo pipefail
+          # Dependabot always names branches `dependabot/<ecosystem>/…`.
+          eco="$(cut -d/ -f2 <<<"$HEAD_REF")"
+          # An unset variable allows nothing. That is the right default for a repository that has
+          # not decided, which is why the empty case is not special-cased.
+          case " ${ALLOWED:-} " in
+            *" $eco "*) echo "verdict=allowed" >> "$GITHUB_OUTPUT" ;;
+            *) echo "==> '$eco' is not in ACB_DEPENDABOT_ECOSYSTEMS — not auto-merging."
+               echo "verdict=skip" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      # Pinned to the full commit SHA for v3.1.0, not @v3 — a moving tag is a supply-chain
+      # rewrite waiting to happen. `alert-lookup` and `compat-lookup` stay off: both require a
+      # PAT, and neither is used.
+      - name: Fetch Dependabot metadata
+        id: metadata
+        if: steps.ecosystem.outputs.verdict == 'allowed'
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Three rules, all fail-closed.
+      #
+      # Rule 1 — single commit. `fetch-metadata` verifies the PR author and then reads and
+      #          signature-checks only `commits[0]`; nothing looks at commits 2..n. Auto-merge, by
+      #          contrast, merges HEAD. Anyone with write access could push a second commit onto a
+      #          genuine Dependabot branch and have it armed on the strength of a trailer from a
+      #          commit the gate never examined. Every Dependabot PR this repository has seen
+      #          carries exactly one commit, so requiring that closes the gap for free.
+      #
+      # Rule 2 — the ecosystem allow-list again, as defence in depth behind the job-level `if:`.
+      #
+      # Rule 3 — every dependency must declare patch or minor. Why not
+      #          `steps.metadata.outputs.update-type`, which would be one line: on SECURITY
+      #          updates Dependabot omits `update-type:` from the commit trailer entirely —
+      #          verified on PR #78, whose trailer carries only dependency-name/-version/-type.
+      #          The action then derives the type by parsing "Updates `x` from A to B" out of the
+      #          PR body and yields "" for any entry it cannot parse (#78's esbuild line reads
+      #          "Removes `esbuild`", with an empty dependency-version). `update-type` is the MAX
+      #          across entries and the max skips blanks — so a security PR whose only major is an
+      #          unparseable entry reports minor, and a gate reading that output would arm
+      #          auto-merge on a major.
+      #
+      # Key names are camelCase because this output is the action's internal struct serialised
+      # by @actions/core — `updateType`, `packageEcosystem` — not the kebab-case summary outputs.
+      #
+      # An empty `DEPS_JSON` is rejected explicitly: jq reads no values from empty input and exits
+      # 0, which would leave `verdict` blank rather than failing. Malformed input does exit
+      # non-zero, and `set -euo pipefail` turns that into a failed step. A failure here is safe by
+      # construction — `apply` treats an unknown verdict as ineligible, never as eligible.
+      - name: Decide whether this PR may auto-merge
+        id: gate
+        if: steps.ecosystem.outputs.verdict == 'allowed'
+        env:
+          ALLOWED: ${{ vars.ACB_DEPENDABOT_ECOSYSTEMS }}
+          DEPS_JSON: ${{ steps.metadata.outputs.updated-dependencies-json }}
+          PR_COMMITS: ${{ github.event.pull_request.commits }}
+        run: |
+          set -euo pipefail
+          [[ -n "$DEPS_JSON" ]] || { echo "fetch-metadata produced no dependency JSON" >&2; exit 1; }
+
+          if [[ "$PR_COMMITS" != "1" ]]; then
+            verdict="not-eligible: ${PR_COMMITS} commits on the branch; only the first is verified"
+          else
+            verdict="$(printf '%s' "$DEPS_JSON" | jq -r '
+              if type != "array" or length == 0 then "not-eligible: no dependency metadata"
+              elif any(.[]; (env.ALLOWED // "") | split(" ") | index(.packageEcosystem) | not)
+                then "not-eligible: an ecosystem outside the allow-list"
+              elif all(.[]; .updateType == "version-update:semver-patch"
+                         or .updateType == "version-update:semver-minor")
+                then "eligible"
+              else "not-eligible: at least one dependency is not patch or minor"
+              end')"
+          fi
+
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "${verdict}"
+          # Guarded: the bare `.[]` form dies on non-array input, which is exactly the input the
+          # verdict above handles gracefully — an unguarded log line would fail the step and
+          # suppress the explanation it exists to provide.
+          printf '%s' "$DEPS_JSON" | jq -r '
+            if type == "array"
+              then .[] | "  \(.dependencyName): \(.prevVersion // "?") -> \(.newVersion // "?") [\(.updateType // "unknown")]"
+              else "  (dependency metadata was not a JSON array)"
+            end'
+
+  apply:
+    name: Dependabot auto-merge
+    needs: gate
+    runs-on: ubuntu-latest
+    # `!cancelled()` rather than the implicit `success()`: if `gate` FAILS, its verdict is empty,
+    # which is not 'eligible', and the disarm branch below must still run. Skipping on failure
+    # would make the only mechanism that un-arms a PR fail open. `needs.gate.result != 'skipped'`
+    # keeps this off PRs that were never Dependabot npm bumps in the first place.
+    if: ${{ !cancelled() && needs.gate.result != 'skipped' }}
+    # This job runs no third-party code — only `gh`, preinstalled on the runner.
+    #
+    # `contents: write` is required. It was first shipped omitted, on the argument that
+    # `gh pr merge --auto` only issues the GraphQL `enablePullRequestAutoMerge` mutation and never
+    # merges anything itself. The first real run disproved that: run 31432435114 on PR #117 failed
+    # with
+    #
+    #   GraphQL: Resource not accessible by integration (enablePullRequestAutoMerge)
+    #
+    # and run 31432454576 failed the same way on `disablePullRequestAutoMerge`. Those runs prove
+    # `pull-requests: write` alone is insufficient; that `contents: write` is what closes the gap
+    # is GitHub's documented example plus the absence of any other candidate scope, and the next
+    # live run is what confirms it. Do not narrow this again without a run to point at.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # An App installation token, in place of GITHUB_TOKEN, and NOT because of scope — GITHUB_TOKEN
+      # already holds `contents: write` here. It is about what GitHub does with the resulting push.
+      #
+      # A `push` or `pull_request` event triggered by GITHUB_TOKEN starts NO workflow run
+      # (`workflow_dispatch` and `repository_dispatch` are the documented exceptions). Auto-merge
+      # armed with it merges as `app/github-actions`, so an auto-merged bump has always landed on
+      # `main` with no push-side CI run — `8211ee8` (PR #117) is the proof, and "How this meets
+      # CI/CD" in docs/sdlc.md predicted the consequence: *anything built later that keys off "CI
+      # ran on main" must not assume otherwise*. Phase 3's Deploy workflow is that later thing, and
+      # it keys off exactly that. An App token pushes as a first-class actor, so CI and Deploy both
+      # run and Dependabot stops being a special case.
+      #
+      # The credentials live in the DEPENDABOT secret store, not the Actions one. This workflow runs
+      # on `pull_request` events raised by Dependabot, and GitHub does not pass Actions secrets to
+      # those runs — `gh secret set` without `--app dependabot` leaves both inputs empty and this
+      # step fails in a way that looks like a broken App. The two stores are indistinguishable in
+      # the settings UI, so that is worth knowing before debugging it.
+      #
+      # Pinned by SHA with the version in a trailing comment, matching how `gate` pins
+      # dependabot/fetch-metadata. `github_actions` is deliberately outside this workflow's own
+      # auto-merge allow-list, so a new SHA here is always read by a human before it merges.
+      #
+      # This is the only third-party action in the write-scoped job, which the two-job split was
+      # built to avoid. It is accepted for one reason: there is no way to change the merging
+      # identity without something minting a token, and this action is GitHub's own. `gate` still
+      # holds `pull-requests: read`, so the split it exists to create is unchanged.
+      #
+      # Only the ARM path uses this token, and only the arm path needs to: it is the merge that has
+      # to fire CI and Deploy. The disarm path deliberately keeps GITHUB_TOKEN — see that step.
+      #
+      # No `if:` guard. This is the first step in the job, so a step-level `success()` (which asks
+      # only whether an earlier step in THIS job failed, and there are none) is trivially true; a
+      # `!cancelled()` here would be a no-op dressed as a safeguard. The step therefore runs
+      # whenever `apply` runs, and if it fails the arm step is skipped while disarm still works.
+      #
+      # `client-id`, not `app-id`: v3.2.0 marks app-id deprecated with "Use 'client-id' instead",
+      # so pinning to it would emit a warning on every run and break on the action's next major —
+      # arriving as a Dependabot bump that a human reads, since github_actions is outside this
+      # workflow's own auto-merge allow-list.
+      #
+      # The permissions are narrowed AT MINT. Without them the token inherits the App's whole
+      # installation permission set, so anyone adding a permission in the GitHub UI — one click,
+      # invisible in this repository's history — would silently widen every token this workflow
+      # mints, with no diff and no review. That would defeat the point of creating a minimal App.
+      - name: Mint a GitHub App installation token
+        id: apptoken
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.AUTOMERGE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMERGE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # `--squash`, not `--merge`: the ruleset allows only squash and rebase, and
+      # required_linear_history is on. GitHub's own documented example uses `--merge` and would
+      # fail here.
+      #
+      # No `gh pr review --approve`: required_approving_review_count is 0, and the repository
+      # sets can_approve_pull_request_reviews: false, so Actions could not approve anyway.
+      - name: Arm auto-merge
+        if: needs.gate.outputs.verdict == 'eligible'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+        run: gh pr merge --auto --squash "$PR_URL"
+
+      # Arming is sticky, so ineligibility has to be acted on, not just logged: GitHub disables
+      # auto-merge only when someone WITHOUT write permission pushes to the head branch, and
+      # Dependabot has write. A grouped PR armed while patch-only and later updated in place to
+      # carry a major would otherwise stay armed and merge that major unattended.
+      #
+      # The state is READ FIRST and acted on second, for two reasons. It distinguishes auto-merge
+      # this workflow armed from auto-merge a human armed after reading the diff — revoking a
+      # deliberate human decision would be its own defect, and `allow_auto_merge` is repo-wide, so
+      # a human arming a major is a real scenario. And it means a failing `--disable-auto` is
+      # always a hard failure, instead of being masked by a "was not armed anyway" fallback that
+      # would have swallowed exactly the token-scope regression this file already hit once.
+      #
+      # `set +e` is not redundant: GitHub invokes steps as `bash -e {0}`, so errexit is ON before
+      # the script starts and `set -uo pipefail` does not clear it. Without this, the `gh` failure
+      # paths below are unreachable — the script would die at the assignment.
+      # GH_TOKEN here is GITHUB_TOKEN, NOT the App token, and that is the whole point. This step is
+      # the only mechanism that un-arms an ineligible PR, and this workflow is deliberately not a
+      # required check — so a red job blocks nothing. Minting the App token can fail (secrets
+      # absent or rotated, App uninstalled, the API down), and a disarm step holding an empty token
+      # cannot disarm: it would exit 1 having left the PR armed, which is fail-OPEN with a red
+      # light nobody has to obey. GITHUB_TOKEN is always present and already carries the scopes
+      # this step needs. Only the arm path requires App identity.
+      - name: Disarm auto-merge if it is no longer eligible
+        if: ${{ !cancelled() && needs.gate.outputs.verdict != 'eligible' }}
+        env:
+          # Which login means "this workflow armed it". Taken from the mint step when it ran, and
+          # from a repository variable when it did not — the identity must be knowable even on the
+          # runs where minting FAILED, because those are exactly the runs where an ineligible PR is
+          # still armed and needs disarming. Guessing instead (treating any unrecognised bot as
+          # ours) would revoke a maintainer's deliberate `@dependabot merge`, which the branch
+          # below exists to protect.
+          APP_SLUG: ${{ steps.apptoken.outputs.app-slug || vars.AUTOMERGE_APP_SLUG }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERDICT: ${{ needs.gate.outputs.verdict }}
+        run: |
+          set +e
+          set -uo pipefail
+
+          # Identifies WHO armed auto-merge, from `is_bot` AND the login together, and fails
+          # closed whenever it cannot tell. Neither signal alone is enough, and both halves of
+          # that were learned the hard way — see "Auto-merging dependency bumps" in docs/sdlc.md.
+          #
+          # `--jq '.autoMergeRequest'` prints an EMPTY string when the field is null, not the text
+          # "null" (run 31432454576). Every branch below emits two non-empty fields, so an empty
+          # result still means "gh itself failed".
+          #
+          # `enabledBy` is a NULLABLE Actor in GraphQL — a deleted account or an uninstalled app
+          # yields null — so `is_bot` can be absent rather than false. `| type` distinguishes the
+          # two; a bare `// false` would read "absent" as "a human armed it" and leave an
+          # ineligible PR armed, which is the failure this whole step exists to prevent.
+          state="$(gh pr view "$PR_URL" --json autoMergeRequest --jq '
+            if .autoMergeRequest == null then "none -"
+            elif (.autoMergeRequest.enabledBy.is_bot | type) != "boolean" then "indeterminate -"
+            else "\(if .autoMergeRequest.enabledBy.is_bot then "bot" else "human" end) \(.autoMergeRequest.enabledBy.login // "" | if . == "" then "unknown" else . end)"
+            end')"
+          rc=$?
+          if [[ "$rc" -ne 0 || -z "$state" ]]; then
+            echo "could not read auto-merge state (gh exit ${rc}) — refusing to assume it is disarmed" >&2
+            exit 1
+          fi
+          read -r kind who <<<"$state"
+          who="${who:-unknown}"
+
+          if [[ "$kind" == "none" ]]; then
+            echo "auto-merge was not armed — nothing to disarm"
+            exit 0
+          fi
+
+          # Both signals, not either. `is_bot` alone matches ANY app — including a maintainer who
+          # deliberately ran `@dependabot merge` on a major after reading it — and silently
+          # revoking a considered decision is its own defect. The login alone was the bug in #128.
+          #
+          # `indeterminate` disarms too, and the reason is worth stating because the obvious
+          # alternative is wrong. An earlier version exited 1 here and called that failing closed.
+          # It is not: this workflow is deliberately NOT a required check, so a red job blocks
+          # nothing — the PR would stay armed and merge. Refusing to act is fail-OPEN with a red
+          # light nobody has to obey. Disarming an actor we cannot identify may revoke a human's
+          # decision, which is visible and recoverable in one click; letting an ineligible PR merge
+          # unattended is neither.
+          # The set of logins that mean "this workflow armed it" MOVED when arming moved to the App.
+          # `github-actions` and `app/github-actions` are the legacy pair, kept for PRs armed before
+          # that change; the App contributes its own slug, in both the bare and `app/`-prefixed
+          # forms `gh` and GraphQL respectively report. Leaving the legacy pair as the only match
+          # would mean the workflow could no longer recognise its own arming — it would print
+          # "armed by someone else, leaving it alone" and let an ineligible PR merge unattended,
+          # which is the exact failure this step exists to prevent.
+          ours=("github-actions" "app/github-actions")
+          if [[ -n "${APP_SLUG:-}" ]]; then
+            ours+=("$APP_SLUG" "app/${APP_SLUG}")
+          fi
+
+          disarm=no
+          note=""
+          if [[ "$kind" == "bot" ]]; then
+            for candidate in "${ours[@]}"; do
+              if [[ "$who" == "$candidate" ]]; then
+                disarm=yes
+                note="this workflow armed it"
+                break
+              fi
+            done
+
+          elif [[ "$kind" == "indeterminate" ]]; then
+            disarm=yes
+            note="the enabling actor could not be identified"
+          fi
+
+          if [[ "$disarm" != "yes" ]]; then
+            echo "auto-merge was armed by '${who}', not by this workflow — leaving it alone."
+            echo "Someone who arms auto-merge on an ineligible PR has read the diff; that stands."
+            exit 0
+          fi
+
+          # An empty VERDICT means `gate` failed, not that the PR was judged ineligible. Disarming
+          # is still right — an unknown verdict must not stay armed — but the log has to say which
+          # it was, or it claims a judgement that was never made.
+          reason="${VERDICT:-the gate produced no verdict, so eligibility is unknown}"
+          if ! gh pr merge --disable-auto "$PR_URL"; then
+            echo "FAILED to disarm auto-merge armed by '${who}' — ${reason}" >&2
+            exit 1
+          fi
+          echo "auto-merge disarmed — ${note}, and: ${reason}"
+
+          # Safety first, signal second: the PR is disarmed either way, but an unidentifiable
+          # actor means gh's payload shape moved and this step needs a human.
+          if [[ "$kind" == "indeterminate" ]]; then
+            echo "::warning::auto-merge was disarmed without identifying who armed it — check gh's autoMergeRequest payload shape"
+            echo "disarmed, but the enabling actor could not be identified — fix this step" >&2
+            exit 1
+          fi
+          exit 0
+
+      # Prints why a PR was left alone, so "why did this not merge?" is answered in the run log
+      # rather than by re-deriving the rule. Majors are the common case here. `!cancelled()` for
+      # the same reason as the disarm step: a failed `gate` is exactly when an explanation is
+      # most useful.
+      - name: Explain why auto-merge was not armed
+        if: ${{ !cancelled() && needs.gate.outputs.verdict != 'eligible' }}
+        env:
+          VERDICT: ${{ needs.gate.outputs.verdict }}
+        run: |
+          echo "Auto-merge not armed — ${VERDICT:-gate did not produce a verdict}."
+          echo "Merge this one by hand after reading the diff."
