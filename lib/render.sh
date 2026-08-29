@@ -116,6 +116,7 @@ acb_render_ruleset() {
 
 acb_render_claude_md() {
   local rows id
+  # shellcheck disable=SC2016  # the backticks are markdown code spans in the output, not syntax
   rows="$(for id in $(acb_components); do
             printf '| `%s` | `cd %s && ./verify.sh` | _document the dev command here_ |\n' "$id" "$id"
           done)"

@@ -43,6 +43,7 @@ run_fixture() {
 }
 
 # 1. Wired correctly: errexit on, dispatcher passes the status through.
+# shellcheck disable=SC2016  # the ${…} is fixture content written into a generated script, not an expansion here
 run_fixture 'set -euo pipefail' '"target_${1:-lint}"'
 if [[ $rc -eq 0 ]]; then ok "a correctly wired verify.sh conforms"
 else bad "a correctly wired verify.sh conforms" "exit $rc: $out"; fi
@@ -50,12 +51,14 @@ else bad "a correctly wired verify.sh conforms" "exit $rc: $out"; fi
 # 2. No errexit. The planted `false` is followed by `true`, so without errexit the body's status
 #    is the LAST command's and the failure vanishes. This is how a target with several checks
 #    silently reports green after the first one fails.
+# shellcheck disable=SC2016  # the ${…} is fixture content written into a generated script, not an expansion here
 run_fixture 'set -uo pipefail' '"target_${1:-lint}"'
 if [[ $rc -ne 0 && "$out" == *"propagates"* ]]; then ok "a body running without errexit is caught"
 else bad "a body running without errexit is caught" "expected non-zero naming 'propagates', got $rc: $out"; fi
 
 # 3. A dispatcher that swallows the target's status. errexit is on and the body is fine; the
 #    silencing happens one level up, which is the harder of the two to notice by reading.
+# shellcheck disable=SC2016  # the ${…} is fixture content written into a generated script, not an expansion here
 run_fixture 'set -euo pipefail' '"target_${1:-lint}" || true'
 if [[ $rc -ne 0 && "$out" == *"propagates"* ]]; then ok "a dispatcher swallowing the status is caught"
 else bad "a dispatcher swallowing the status is caught" "expected non-zero naming 'propagates', got $rc: $out"; fi
