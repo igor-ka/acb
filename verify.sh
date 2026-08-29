@@ -13,12 +13,15 @@ lint() {
     return 1
   fi
   # -x follows `source` so lib/*.sh is analysed in the context that sources it.
-  run shellcheck -x bin/acb lib/*.sh tests/*.test.sh
+  run shellcheck -x bin/acb lib/*.sh tests/*.test.sh \
+    carried/scripts/*.sh carried/scripts/tests/*.test.sh
 }
 
 selftest() {
   local t status=0
-  for t in tests/*.test.sh; do
+  # The carried suites run here too. They are the only thing standing between a de-hardcoding
+  # mistake and every consumer inheriting it.
+  for t in tests/*.test.sh carried/scripts/tests/*.test.sh; do
     echo "==> $t"
     "$t" || status=1
   done
