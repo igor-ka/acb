@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+ACB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export ACB_ROOT
+
+usage() {
+  cat <<'USAGE'
+usage: acb <command> [args]
+
+  init <dir> [--repo owner/name]  scaffold a repository from this toolkit
+  status                          what this repository is behind or ahead on
+  pull                            bring carried files up to the toolkit's HEAD
+  propose <path>...               open a PR upstream with carried files you changed
+
+exit codes: 0 ok · 1 failure · 2 usage · 3 refused by design
+USAGE
+}
+
+# jq is required by every command and by the carried gate scripts. Checked here rather than at
+# first use: an absent jq otherwise surfaces as an empty config, which reads as "no components"
+# and renders an empty CI workflow — a silent wrong answer instead of an error.
+if ! command -v jq >/dev/null 2>&1; then
+  echo "✗ acb requires jq (brew install jq)." >&2
+  exit 1
+fi
+
+# shellcheck source=lib/config.sh
+source "$ACB_ROOT/lib/config.sh"
+
+cmd="${1:-}"; [[ $# -gt 0 ]] && shift
+case "$cmd" in
+  ""|-h|--help|help)
+    usage
+    if [[ -z "$cmd" ]]; then exit 2; fi
+    exit 0
+    ;;
+  init)    source "$ACB_ROOT/lib/render.sh"; acb_cmd_init "$@" ;;
+  status)  source "$ACB_ROOT/lib/sync.sh";   acb_cmd_status "$@" ;;
+  pull)    source "$ACB_ROOT/lib/sync.sh";   acb_cmd_pull "$@" ;;
+  propose) source "$ACB_ROOT/lib/sync.sh";   acb_cmd_propose "$@" ;;
+  *) echo "✗ unknown command '$cmd'." >&2; usage >&2; exit 2 ;;
+esac

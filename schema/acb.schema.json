@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "acb configuration",
+  "type": "object",
+  "required": [
+    "template",
+    "process",
+    "components"
+  ],
+  "properties": {
+    "template": {
+      "type": "object",
+      "required": [
+        "repo",
+        "commit"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        }
+      }
+    },
+    "process": {
+      "type": "object",
+      "required": [
+        "doc",
+        "watched"
+      ],
+      "properties": {
+        "doc": {
+          "type": "string"
+        },
+        "watched": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "prShapeHatch": {
+          "type": "string"
+        },
+        "sdlcSyncHatch": {
+          "type": "string"
+        },
+        "dependabotEcosystems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "checkName",
+          "targets"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "checkName": {
+            "type": "string"
+          },
+          "runner": {
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
