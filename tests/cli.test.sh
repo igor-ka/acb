@@ -23,7 +23,7 @@ asserts "unknown subcommand exits 2"     2 "unknown command 'frobnicate'" frobni
 asserts "--help exits 0"                 0 "usage: acb" --help
 asserts "status outside an acb repo"     1 "run 'acb init' first" status
 asserts "init with no directory is usage" 2 "usage: acb init" init
-asserts "pull is not implemented yet"    1 "not implemented until ACB-5" pull
+asserts "pull outside an acb repo"       1 "run 'acb init' first" pull
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
