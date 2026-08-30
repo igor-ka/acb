@@ -152,5 +152,47 @@ if [[ $rc -eq 3 ]] && grep -q 'uncommitted changes' <<<"$out"; then
   ok "propose refuses a dirty toolkit checkout"
 else bad "propose refuses a dirty toolkit checkout" "exit $rc: $out"; fi
 
+# --- drift: a component's job need not live in ci.yml -------------------------------------------
+#
+# acb_check_drift reads only the working directory, so it is exercised directly rather than
+# through `acb status`, which would need a whole consumer fixture. lib/sync.sh is pure function
+# definitions, so sourcing it has no side effect.
+drift_in() {   # <dir> -> sets $out and $rc
+  out="$( cd "$1" && ACB_ROOT="$REAL_ROOT" bash -c \
+            'source "$ACB_ROOT/lib/sync.sh"; acb_check_drift' 2>&1 )"; rc=$?
+}
+
+# Terraform gets its own workflow so its toolchain setup is not in the middle of the Node
+# pipeline; a deployment-script suite gets one so it can be required without lodging in another
+# job. Reading ci.yml alone reports both as "required, no job" and makes status permanently red
+# for a repository that did nothing wrong.
+d="$(mktemp -d)"; mkdir -p "$d/.github/workflows"
+cat > "$d/.acb.json" <<'JSON'
+{ "template": { "repo": "example/repo", "commit": "0" },
+  "process": { "doc": "docs/sdlc.md", "watched": ["^scripts/"] },
+  "components": [ { "id": "app", "checkName": "App checks", "targets": ["lint"] } ] }
+JSON
+printf 'jobs:\n  app:\n    name: App checks\n' > "$d/.github/workflows/ci.yml"
+printf 'jobs:\n  tf:\n    name: Terraform checks\n' > "$d/.github/workflows/terraform.yml"
+# A workflow that gates nothing, which is normal and must not be an error.
+printf 'jobs:\n  am:\n    name: Dependabot auto-merge\n' > "$d/.github/workflows/auto-merge.yml"
+cat > "$d/.github/ruleset.json" <<'JSON'
+{ "rules": [ { "type": "required_status_checks", "parameters": { "required_status_checks":
+  [ {"context":"App checks"}, {"context":"Terraform checks"},
+    {"context":"SDLC docs"}, {"context":"PR shape"} ] } } ] }
+JSON
+
+drift_in "$d"
+if [[ $rc -eq 0 && "$out" == *"drift: none"* ]]; then
+  ok "a job in another workflow is not drift"
+else bad "a job in another workflow is not drift" "exit $rc: $out"; fi
+
+# The direction that still matters: a required check no job anywhere produces hangs every merge.
+rm "$d/.github/workflows/terraform.yml"
+drift_in "$d"
+if [[ $rc -eq 1 && "$out" == *"Terraform checks"* ]]; then
+  ok "a required check with no job is still drift, and is named"
+else bad "a required check with no job is still drift, and is named" "exit $rc: $out"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
