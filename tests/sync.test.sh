@@ -152,5 +152,92 @@ if [[ $rc -eq 3 ]] && grep -q 'uncommitted changes' <<<"$out"; then
   ok "propose refuses a dirty toolkit checkout"
 else bad "propose refuses a dirty toolkit checkout" "exit $rc: $out"; fi
 
+# --- drift ------------------------------------------------------------------------------------
+#
+# acb_check_drift reads only the working directory, so it is exercised directly rather than
+# through `acb status`, which would need a whole consumer fixture. lib/sync.sh is pure function
+# definitions, so sourcing it has no side effect. `set -uo pipefail` matches bin/acb: without it a
+# future unset-variable reference would abort under the real entry point and pass here.
+drift_in() {   # <dir> -> sets $out and $rc
+  out="$( cd "$1" && ACB_ROOT="$REAL_ROOT" bash -c \
+            'set -uo pipefail; source "$ACB_ROOT/lib/sync.sh"; acb_check_drift' 2>&1 )"; rc=$?
+}
+
+drift_fixture() {   # -> echoes a fresh directory
+  local d; d="$(mktemp -d)"; mkdir -p "$d/.github/workflows"
+  cat > "$d/.acb.json" <<'JSON'
+{ "template": { "repo": "example/repo", "commit": "0" },
+  "process": { "doc": "docs/sdlc.md", "watched": ["^scripts/"] },
+  "components": [ { "id": "app", "checkName": "App checks", "targets": ["lint"] } ] }
+JSON
+  printf 'jobs:\n  app:\n    name: App checks\n' > "$d/.github/workflows/ci.yml"
+  printf 'jobs:\n  tf:\n    name: Terraform checks\n' > "$d/.github/workflows/terraform.yml"
+  printf 'jobs:\n  sdlc:\n    name: SDLC docs\n' > "$d/.github/workflows/sdlc-docs.yml"
+  printf 'jobs:\n  shape:\n    name: PR shape\n' > "$d/.github/workflows/pr-shape.yml"
+  # A workflow that gates nothing, which is normal and must not be an error.
+  printf 'jobs:\n  am:\n    name: Dependabot auto-merge\n' > "$d/.github/workflows/auto-merge.yml"
+  cat > "$d/.github/ruleset.json" <<'JSON'
+{ "rules": [ { "type": "required_status_checks", "parameters": { "required_status_checks":
+  [ {"context":"App checks"}, {"context":"Terraform checks"},
+    {"context":"SDLC docs"}, {"context":"PR shape"} ] } } ] }
+JSON
+  printf '%s' "$d"
+}
+
+# Terraform gets its own workflow so its toolchain setup is not in the middle of the Node
+# pipeline; a deployment-script suite gets one so it can be required without lodging in another
+# job. Reading ci.yml alone reports both as "required, no job" and makes status permanently red
+# for a repository that did nothing wrong.
+d="$(drift_fixture)"
+drift_in "$d"
+if [[ $rc -eq 0 && "$out" == *"drift: none"* ]]; then
+  ok "a job in another workflow is not drift"
+else bad "a job in another workflow is not drift" "exit $rc: $out"; fi
+
+# The ungated listing is asserted, not just implied: without this, deleting the whole branch that
+# produces it and restoring a bare `echo "drift: none"` would keep both cases green.
+if [[ "$out" == *"Dependabot auto-merge"* && "$out" == *"not required"* ]]; then
+  ok "a job nothing requires is listed, not failed"
+else bad "a job nothing requires is listed, not failed" "$out"; fi
+
+# The direction that still matters: a required check no job anywhere produces hangs every merge.
+d="$(drift_fixture)"; rm "$d/.github/workflows/terraform.yml"
+drift_in "$d"
+if [[ $rc -eq 1 && "$out" == *"Terraform checks"* ]]; then
+  ok "a required check with no job is still drift, and is named"
+else bad "a required check with no job is still drift, and is named" "exit $rc: $out"; fi
+
+# The failure the two hardcoded `echo`s used to hide. `SDLC docs` and `PR shape` were injected
+# unconditionally, so a consumer who deleted the workflow producing one saw `drift: none` while
+# every pull request blocked forever on a check nothing produced.
+d="$(drift_fixture)"; rm "$d/.github/workflows/sdlc-docs.yml"
+drift_in "$d"
+if [[ $rc -eq 1 && "$out" == *"SDLC docs"* ]]; then
+  ok "a deleted process workflow is drift, not an assumption"
+else bad "a deleted process workflow is drift, not an assumption" "exit $rc: $out"; fi
+
+# GitHub Actions reads .yaml as readily as .yml; a glob that does not is a false "no job produces
+# this" on a repository that is correct.
+d="$(drift_fixture)"; mv "$d/.github/workflows/terraform.yml" "$d/.github/workflows/terraform.yaml"
+drift_in "$d"
+if [[ $rc -eq 0 ]]; then ok "a .yaml workflow is read too"
+else bad "a .yaml workflow is read too" "exit $rc: $out"; fi
+
+# A job with no `name:` produces a check context equal to its job ID. Omitting `name:` is ordinary
+# in a hand-written workflow, and reading only `name:` lines makes such a job invisible.
+d="$(drift_fixture)"
+printf 'jobs:\n  terraform:\n    runs-on: ubuntu-latest\n    steps:\n      - name: x\n        run: true\n' \
+  > "$d/.github/workflows/terraform.yml"
+python3 - "$d/.github/ruleset.json" <<'PY'
+import json, sys
+p = sys.argv[1]; r = json.load(open(p))
+c = r["rules"][0]["parameters"]["required_status_checks"]
+c[:] = [x for x in c if x["context"] != "Terraform checks"] + [{"context": "terraform"}]
+json.dump(r, open(p, "w"))
+PY
+drift_in "$d"
+if [[ $rc -eq 0 ]]; then ok "a job with no name: contributes its job id"
+else bad "a job with no name: contributes its job id" "exit $rc: $out"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

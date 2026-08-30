@@ -34,7 +34,15 @@ render() {
 
 all() { lint; selftest; }
 
+# The contract this toolkit ships, honoured by the toolkit itself. Nothing checks it here — acb is
+# not a declared component of anything — which is why writing it by hand is the honest test of
+# whether the four lines in docs/sdlc.md are actually enough.
+TARGETS="lint selftest render"
+
 case "${1:-all}" in
-  lint|selftest|render|all) "${1:-all}" ;;
-  *) echo "usage: ./verify.sh [lint|selftest|render|all]" >&2; exit 2 ;;
+  all) all ;;
+  --targets) printf '%s\n' "$TARGETS" | tr ' ' '\n'; exit 0 ;;
+  lint|selftest|render) "$1" ;;
+  # 64, not 2: "no such target", distinguishable from "declared but not implemented".
+  *) echo "usage: ./verify.sh [$TARGETS|all|--targets]" >&2; exit 64 ;;
 esac

@@ -52,16 +52,24 @@ jobs:
     # `github.repository` keeps this inert in forks. `user.login` is set by GitHub from the
     # authenticated actor and cannot be forged by a PR author.
     #
-    # The branch-prefix test is the ecosystem allow-list, hoisted to where it runs BEFORE any
-    # step does. It has to be here, not in the jq rules below: for `pull_request` the workflow
+    # The branch-prefix test here is only "is this Dependabot at all". THE ECOSYSTEM ALLOW-LIST
+    # IS THE FIRST STEP OF THIS JOB, not this `if:` — see "Check the ecosystem is allowed" below.
+    # What matters is that it runs BEFORE any third-party action: for `pull_request` the workflow
     # file is read from the merge ref, so a Dependabot PR that bumps this file's own
     # `fetch-metadata` pin would run the *replacement* action, and only afterwards reach a rule
     # that rejects the `github_actions` ecosystem. Rejecting on metadata the action itself
-    # produces is too late by construction. `github.head_ref` is event data, available before the
-    # first step, and Dependabot always names branches `dependabot/<ecosystem>/…`. Verified live
-    # on PR #98 (`dependabot/github_actions/…`), run 31434426736: both jobs report `skipped`, so
-    # `fetch-metadata` never executed. Note a job-level `if:` still *creates* a workflow run — it
-    # suppresses the jobs, not the run.
+    # produces is too late by construction.
+    #
+    # It moved out of this `if:` when the list moved to a repository variable. Not because a
+    # job-level `if:` cannot read one — `vars` IS available in that context — but because workflow
+    # expressions cannot split `github.head_ref` on `/` to extract the ecosystem, nor test
+    # membership of a space-separated list. `cut -d/ -f2` and a `case` do both in four lines.
+    # `scripts/tests/dependabot-auto-merge-disarm.test.sh` asserts the ordering, since a step's
+    # position is not self-enforcing the way a job-level `if:` was.
+    #
+    # Verified live on PR #98 (`dependabot/github_actions/…`), run 31434426736: both jobs report
+    # `skipped`, so `fetch-metadata` never executed. Note a job-level `if:` still *creates* a
+    # workflow run — it suppresses the jobs, not the run.
     if: >-
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.event.repository.fork == false &&
@@ -118,7 +126,7 @@ jobs:
       #          commit the gate never examined. Every Dependabot PR this repository has seen
       #          carries exactly one commit, so requiring that closes the gap for free.
       #
-      # Rule 2 — the ecosystem allow-list again, as defence in depth behind the job-level `if:`.
+      # Rule 2 — the ecosystem allow-list again, as defence in depth behind the first step.
       #
       # Rule 3 — every dependency must declare patch or minor. Why not
       #          `steps.metadata.outputs.update-type`, which would be one line: on SECURITY
@@ -154,7 +162,8 @@ jobs:
           else
             verdict="$(printf '%s' "$DEPS_JSON" | jq -r '
               if type != "array" or length == 0 then "not-eligible: no dependency metadata"
-              elif any(.[]; (env.ALLOWED // "") | split(" ") | index(.packageEcosystem) | not)
+              elif any(.[]; .packageEcosystem as $e
+                            | ((env.ALLOWED // "") | split(" ") | index($e)) | not)
                 then "not-eligible: an ecosystem outside the allow-list"
               elif all(.[]; .updateType == "version-update:semver-patch"
                          or .updateType == "version-update:semver-minor")

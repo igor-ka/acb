@@ -51,34 +51,77 @@ acb_cmd_status() {
   return $status
 }
 
-# The ruleset and the workflow are generated from one declaration but owned by the consumer
-# afterwards, so a hand-edit to either can leave a job nothing requires, or a required check that
-# no job produces. Both are silent until merge time, which is the wrong time.
+# The ruleset and the workflows are generated from one declaration but owned by the consumer
+# afterwards, so a hand-edit to either can leave a required check that no job produces. That is
+# silent until merge time, which is the wrong time.
+
+# Every check context a workflow file produces. A job's context is its `name:` when it has one and
+# its job ID when it does not — omitting `name:` is ordinary in a hand-written workflow, and
+# reading only `name:` lines would make such a job invisible and its required check look missing.
+acb_workflow_contexts() {
+  # Both extensions: GitHub Actions reads .yml and .yaml alike, and a component's job is exactly
+  # as likely to live in one as the other.
+  local f
+  for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+    [[ -f "$f" ]] || continue
+    awk '
+      /^jobs:[[:space:]]*$/          { injobs = 1; next }
+      injobs && /^[^[:space:]#]/     { if (id != "") print (name != "" ? name : id); id = ""; name = ""; injobs = 0 }
+      injobs && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ {
+        if (id != "") print (name != "" ? name : id)
+        id = $0; sub(/^  /, "", id); sub(/:[[:space:]]*$/, "", id); name = ""
+        next
+      }
+      injobs && id != "" && name == "" && /^    name:[[:space:]]/ {
+        name = $0
+        sub(/^    name:[[:space:]]*/, "", name)
+        gsub(/^["'"'"']|["'"'"']$/, "", name)
+      }
+      END { if (id != "") print (name != "" ? name : id) }
+    ' "$f"
+  done
+}
+
 acb_check_drift() {
-  local jobs required missing
+  local jobs required missing ungated
   if [[ ! -f .github/ruleset.json ]]; then
     echo "drift: no ruleset document — nothing to reconcile"
     return 0
   fi
-  # ci.yml is absent in a zero-component repository, and that is correct rather than an error.
-  # The two process checks come from the CARRIED workflows, not from ci.yml, so reading ci.yml
-  # alone would report them missing on every run and make status permanently red.
-  jobs="$( { if [[ -f .github/workflows/ci.yml ]]; then
-               grep -oE '^ {4}name: .*' .github/workflows/ci.yml | sed 's/.*name: //'
-             fi
-             echo "SDLC docs"; echo "PR shape"; } | LC_ALL=C sort -u )"
+  # EVERY workflow file, and NOTHING assumed. A component's job need not live in ci.yml: a
+  # Terraform job gets its own workflow so its toolchain setup is not in the middle of another
+  # pipeline, and a job that must listen for `pull_request: edited` needs one by construction.
+  #
+  # The two process checks are NOT injected here, though they were. Hardcoding `SDLC docs` and
+  # `PR shape` made this function structurally unable to report the one failure it exists for: a
+  # consumer who deletes or renames sdlc-docs.yml while the ruleset still requires it would see
+  # `drift: none` while every pull request blocked forever on a check nothing produces. The
+  # carried workflows declare those names, so reading the files finds them — and finds their
+  # absence too, which is the point.
+  jobs="$(acb_workflow_contexts | LC_ALL=C sort -u)"
   required="$(jq -r '.rules[]?|select(.type=="required_status_checks")
                      |.parameters.required_status_checks[].context' .github/ruleset.json \
               | LC_ALL=C sort -u)"
-  # LC_ALL=C on both: comm compares byte-wise, and these names contain spaces.
-  missing="$(comm -3 <(printf '%s\n' "$jobs") <(printf '%s\n' "$required"))"
+  # LC_ALL=C on `comm` ITSELF, not only on the sorts feeding it. comm assumes both inputs are
+  # ordered the way it collates, and a locale mismatch makes it walk past matching lines: with
+  # LANG=en_US.UTF-8 (the macOS default) a lowercase check name beside uppercase ones is reported
+  # as missing on a repository that is correctly configured.
+  missing="$(LC_ALL=C comm -13 <(printf '%s\n' "$jobs") <(printf '%s\n' "$required"))"
   if [[ -n "$missing" ]]; then
-    echo "✗ drift between the workflow's job names and the ruleset's required checks:" >&2
+    echo "✗ required checks that no job produces — every merge blocks until this is fixed:" >&2
     printf '%s\n' "$missing" | sed 's/^/    /' >&2
-    echo "  Left column: a job nothing requires. Right column: a required check no job produces." >&2
     return 1
   fi
-  echo "drift: none"
+  # Only one direction is an error. A required check no job produces blocks every merge forever.
+  # A job nothing requires is ordinary — an auto-merge workflow gates nothing by design — so it is
+  # reported and moves on.
+  ungated="$(LC_ALL=C comm -23 <(printf '%s\n' "$jobs") <(printf '%s\n' "$required"))"
+  if [[ -n "$ungated" ]]; then
+    echo "drift: none — these jobs are not required, which may be deliberate:"
+    printf '%s\n' "$ungated" | sed 's/^/    /'
+  else
+    echo "drift: none"
+  fi
   return 0
 }
 

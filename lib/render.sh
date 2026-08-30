@@ -58,6 +58,10 @@ all() { local t; for t in $TARGETS; do "target_$t"; done; }
 
 case "${1:-all}" in
   all) all ;;
+  # The target list, for a caller that needs to know what this script knows without running any
+  # of it. The conformance check reads it; a repository whose targets build images and talk to
+  # databases cannot afford to have its target list probed by execution.
+  --targets) printf '%s\n' "$TARGETS" | tr ' ' '\n' ;;
   *)
     if [[ " $TARGETS " == *" ${1} "* ]]; then
       "target_${1}"
