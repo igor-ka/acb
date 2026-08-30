@@ -68,5 +68,18 @@ empty="$(ACB_CONFIG="$TMP/empty.json" acb_render_ci)"; rc=$?
 if [[ $rc -eq 1 && -z "$empty" ]]; then ok "zero components writes no workflow"
 else bad "zero components writes no workflow" "exit $rc, output '${empty:0:40}'"; fi
 
+# --targets is how the conformance check learns what a script knows without running anything.
+# Introspection, not execution: asking "does target X dispatch?" by running target X re-runs the
+# whole build inside a metadata job for any repository whose targets do something.
+#
+# ACB_CONFIG and the `api` component come from the fixture this file exports at the top; `api`
+# declares ["lint","test"].
+t="$(mktemp -d)"
+acb_render_verify api > "$t/verify.sh"
+chmod +x "$t/verify.sh"
+got="$("$t/verify.sh" --targets | tr '\n' ' ')"
+if [[ "$got" == "lint test " ]]; then ok "the skeleton lists its targets"
+else bad "the skeleton lists its targets" "expected 'lint test ', got '$got'"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
