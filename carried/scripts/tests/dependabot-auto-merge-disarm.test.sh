@@ -250,6 +250,7 @@ else
 fi
 
 # The clause above is only meaningful if the verdict is actually published as a job output.
+# shellcheck disable=SC2016  # ${{ }} is GitHub Actions syntax being matched, not a shell expansion
 if grep -q 'ecosystem: ${{ steps.ecosystem.outputs.verdict }}' "$WORKFLOW"; then
   printf 'ok   %-40s\n' "the ecosystem verdict is a job output"
 else
