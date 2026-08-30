@@ -13,8 +13,12 @@ lint() {
     return 1
   fi
   # -x follows `source` so lib/*.sh is analysed in the context that sources it.
+  # templates/*.sh.tmpl are shell too, and they are the one thing here that ships INTO every
+  # consumer. Leaving them unlinted meant the file with the widest blast radius was the only one
+  # shellcheck never saw.
   run shellcheck -x bin/acb lib/*.sh tests/*.test.sh \
-    carried/scripts/*.sh carried/scripts/tests/*.test.sh
+    carried/scripts/*.sh carried/scripts/tests/*.test.sh \
+    templates/*.sh.tmpl
 }
 
 selftest() {
