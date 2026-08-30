@@ -144,6 +144,17 @@ acb_cmd_init() {
   cd "$dir" || return 1
   [[ -d .git ]] || git init -q -b main || return 1
 
+  # REFUSE an already-initialised repository. Everything below is written unconditionally —
+  # CLAUDE.md, ci.yml, the ruleset, and every component's verify.sh — so running this a second
+  # time replaces a real repository's files with skeletons. A recorded template commit is the
+  # signal that init has already run here; `acb pull` is what refreshes a consumer afterwards.
+  if [[ -f .acb.json ]] && [[ -n "$(jq -r '.template.commit // ""' .acb.json)" ]]; then
+    echo "✗ $dir is already initialised (.acb.json records a template commit)." >&2
+    echo "  init overwrites CLAUDE.md, ci.yml, the ruleset and every component's verify.sh with" >&2
+    echo "  skeletons. Use 'acb pull' to update the carried files; edit the generated ones by hand." >&2
+    return 3
+  fi
+
   # The declaration comes first: everything below is generated from it, so an invalid one must
   # stop the run before any file is written.
   [[ -f .acb.json ]] || acb_scaffold_config

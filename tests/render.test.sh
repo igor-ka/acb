@@ -81,5 +81,30 @@ got="$("$t/verify.sh" --targets | tr '\n' ' ')"
 if [[ "$got" == "lint test " ]]; then ok "the skeleton lists its targets"
 else bad "the skeleton lists its targets" "expected 'lint test ', got '$got'"; fi
 
+# `acb init` writes CLAUDE.md, ci.yml, the ruleset and every component's verify.sh
+# unconditionally. Run a second time on a repository that has been adopted and filled in, it
+# replaces all of them with skeletons — and the generated apply-ruleset.sh header used to tell
+# operators to do exactly that. A recorded template commit is the signal that init has already run.
+i="$(mktemp -d)"
+( cd "$i" && git init -q -b main )
+cat > "$i/.acb.json" <<'JSON'
+{ "template": { "repo": "igor-ka/acb", "commit": "deadbeef" },
+  "process": { "doc": "docs/sdlc.md", "watched": ["^scripts/"] },
+  "components": [ { "id": "app", "checkName": "App checks", "targets": ["lint"] } ] }
+JSON
+printf 'a real CLAUDE.md a consumer wrote by hand\n' > "$i/CLAUDE.md"
+out="$( acb_cmd_init "$i" 2>&1 )"; rc=$?
+if [[ $rc -eq 3 && "$out" == *"already initialised"* ]]; then
+  ok "init refuses an already-initialised repository"
+else bad "init refuses an already-initialised repository" "exit $rc: $out"; fi
+if grep -q 'a real CLAUDE.md' "$i/CLAUDE.md"; then ok "init left the consumer's CLAUDE.md alone"
+else bad "init left the consumer's CLAUDE.md alone" "it was overwritten with the template"; fi
+
+# A fresh directory still initialises — the guard keys on the recorded commit, not on the file.
+f="$(mktemp -d)"
+out="$( acb_cmd_init "$f" 2>&1 )"; rc=$?
+if [[ $rc -eq 0 && -f "$f/CLAUDE.md" ]]; then ok "a fresh directory still initialises"
+else bad "a fresh directory still initialises" "exit $rc: $out"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
