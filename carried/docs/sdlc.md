@@ -4,8 +4,9 @@ How a change gets from an idea to `main` in this repository, and which skill gov
 
 This document is a **contract**. If you change the development process — the skills in
 `.claude/skills/`, any component's `verify.sh`, anything in `scripts/`, or a workflow in
-`.github/workflows/` — update this file in the same change. The `SDLC docs` CI job enforces it,
-and `CLAUDE.md` points here as the source of truth.
+`.github/workflows/` — update **the document `process.doc` names in `.acb.json`** in the same
+change. That is usually this file; where a repository keeps its own process specifics separate, it
+is that companion instead. The `SDLC docs` CI job enforces it, and `CLAUDE.md` points at both.
 See [Changing this SDLC](#changing-this-sdlc).
 
 ---
@@ -301,7 +302,7 @@ where it cannot be skipped.
  ─────────                          ──────────────
  ./verify.sh  ───── same script ──▶  <Component> checks   one job per component in .acb.json,
                                                           one step per declared target
-                                     SDLC docs            process changes must update this file
+                                     SDLC docs            process changes must update process.doc
                                      PR shape             a PR closes at most one child issue
                                             │
                                             ▼
@@ -412,8 +413,14 @@ This file is the contract, and it is enforced deterministically rather than by g
 - `.github/workflows/**`
 - `scripts/**`
 
-must also touch this document. The exact list is `process.watched` in `.acb.json`, read at run
-time — so a repository tunes it without editing the gate.
+must also touch **the document `process.doc` names in `.acb.json`**, and the watched list itself
+is `process.watched` in the same file — both read at run time, so a repository tunes them without
+editing the gate.
+
+Pointing `process.doc` at a local companion is the right answer whenever this file is carried and
+a consumer's process changes are its own: a change to one component's `verify.sh` has nothing to
+say in a document shared with every other repository, and requiring an edit here would make that
+repository permanently *ahead* of the toolkit — `acb pull` would revert it on the next run.
 
 > **A check that cannot fail the way production fails is not a gate.** One worked example, because
 > the shape recurs: an image assertion that ran `command -v python3` passed in a shell that *has* a
@@ -505,12 +512,16 @@ Four details in that rule are not decoration:
   container base images: where one forms a containment boundary around untrusted code, it must
   never merge unread.
 
-  The check lives in the **job-level `if:`**, on `github.head_ref`, not in the gate that reads the
-  action's output — and that placement is the whole point. For `pull_request` the workflow file is
-  read from the merge ref, so a Dependabot PR bumping this workflow's own `fetch-metadata` pin
-  would execute the *replacement* action under the job's writable token and only afterwards reach
-  a gate that rejects it. Any rule that depends on metadata the third-party action produces is too
-  late by construction. The gate repeats the check as defence in depth.
+  The check is the **first step of the job**, before any third-party action runs — and that
+  placement is the whole point. For `pull_request` the workflow file is read from the merge ref,
+  so a Dependabot pull request bumping this workflow's own `fetch-metadata` pin would execute the
+  *replacement* action under the job's writable token and only afterwards reach a gate that
+  rejects it. Any rule that depends on metadata the third-party action produces is too late by
+  construction. It was a job-level `if:` while the list was a literal in the file; it became a
+  step when the list moved to a repository variable, because a job-level `if:` cannot read one and
+  still branch per ecosystem. `scripts/tests/dependabot-auto-merge-disarm.test.sh` asserts the
+  ordering, since nothing else now holds it in place. The gate repeats the check as defence in
+  depth.
 - **One commit, or nothing.** `fetch-metadata` verifies the PR author and then reads and
   signature-checks only `commits[0]`; auto-merge merges HEAD. Requiring a single commit closes the
   gap between what was inspected and what would merge. Every Dependabot PR this repository has
