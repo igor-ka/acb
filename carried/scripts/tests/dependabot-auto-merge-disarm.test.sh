@@ -167,6 +167,62 @@ else
   fails=$((fails + 1))
 fi
 
+# --- The gate's verdict expression -------------------------------------------------------------
+#
+# Extracted and RUN, not read. The allow-list moved into this jq when it moved into a repository
+# variable, and a `.` that means the wrong thing inside a pipe is invisible to review and to the
+# ordering assertions above — the step fails closed, so the only symptom is that nothing ever
+# auto-merges again. The same awk shape as the disarm extraction; only the step name differs.
+awk '
+  /^ *- name: Decide whether this PR may auto-merge/ { found = 1; next }
+  found && /^ *run: \|/   { inrun = 1; indent = -1; next }
+  inrun {
+    if ($0 ~ /^[[:space:]]*$/) { print ""; next }
+    match($0, /^ */)
+    if (indent < 0) indent = RLENGTH
+    if (RLENGTH < indent) exit
+    print substr($0, indent + 1)
+  }
+' "$WORKFLOW" > "$TMP/gate.sh"
+[[ -s "$TMP/gate.sh" ]] || { echo "FAIL: extracted an empty gate script — did the step name change?"; exit 1; }
+chmod +x "$TMP/gate.sh"
+
+# verdict <allowed> <commits> <deps-json> -> echoes the verdict, or "STEP-FAILED"
+verdict() {
+  local out
+  : > "$TMP/gh_output"
+  if out="$( ALLOWED="$1" PR_COMMITS="$2" DEPS_JSON="$3" GITHUB_OUTPUT="$TMP/gh_output" \
+             bash "$TMP/gate.sh" 2>&1 )"; then
+    sed -n 's/^verdict=//p' "$TMP/gh_output"
+  else
+    echo "STEP-FAILED: $out"
+  fi
+}
+
+PATCH='[{"dependencyName":"a","packageEcosystem":"npm_and_yarn","updateType":"version-update:semver-patch"}]'
+MAJOR='[{"dependencyName":"a","packageEcosystem":"npm_and_yarn","updateType":"version-update:semver-major"}]'
+ACTIONS='[{"dependencyName":"a","packageEcosystem":"github_actions","updateType":"version-update:semver-patch"}]'
+MIXED='[{"dependencyName":"a","packageEcosystem":"npm_and_yarn","updateType":"version-update:semver-patch"},
+        {"dependencyName":"b","packageEcosystem":"github_actions","updateType":"version-update:semver-patch"}]'
+
+vcheck() { # name expected-substring allowed commits deps
+  local got; got="$(verdict "$3" "$4" "$5")"
+  if [[ "$got" == *"$2"* ]]; then printf 'ok   %-40s\n' "$1"
+  else printf 'FAIL %-40s expected ~%q, got %q\n' "$1" "$2" "$got"; fails=$((fails + 1)); fi
+}
+
+vcheck "an allowed patch bump is eligible"      "eligible"                    "npm_and_yarn" 1 "$PATCH"
+vcheck "a major bump is not"                    "not patch or minor"          "npm_and_yarn" 1 "$MAJOR"
+vcheck "an ecosystem outside the list is not"   "outside the allow-list"      "npm_and_yarn" 1 "$ACTIONS"
+vcheck "one disallowed entry rejects the lot"   "outside the allow-list"      "npm_and_yarn" 1 "$MIXED"
+# An unset variable allows nothing — the right default for a repository that has not decided.
+vcheck "an empty allow-list allows nothing"     "outside the allow-list"      ""             1 "$PATCH"
+# Two ecosystems allowed, and the second one used.
+vcheck "a second allowed ecosystem works"       "eligible"                    "npm_and_yarn github_actions" 1 "$ACTIONS"
+# The one-commit rule, which does not reach jq at all.
+vcheck "more than one commit is not eligible"   "only the first is verified"  "npm_and_yarn" 3 "$PATCH"
+vcheck "non-array metadata is handled"          "no dependency metadata"      "npm_and_yarn" 1 '{}'
+
 if [[ "$fails" -gt 0 ]]; then
   echo
   echo "$fails case(s) failed."

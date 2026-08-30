@@ -154,7 +154,8 @@ jobs:
           else
             verdict="$(printf '%s' "$DEPS_JSON" | jq -r '
               if type != "array" or length == 0 then "not-eligible: no dependency metadata"
-              elif any(.[]; (env.ALLOWED // "") | split(" ") | index(.packageEcosystem) | not)
+              elif any(.[]; .packageEcosystem as $e
+                            | ((env.ALLOWED // "") | split(" ") | index($e)) | not)
                 then "not-eligible: an ecosystem outside the allow-list"
               elif all(.[]; .updateType == "version-update:semver-patch"
                          or .updateType == "version-update:semver-minor")
