@@ -2,6 +2,11 @@
 # The conformance check's fourth assertion — that a failure inside a target reaches the script's
 # exit status — is the one that earns the script. An assertion that cannot fail is exactly what it
 # exists to catch, so it is itself checked here against fixtures built to defeat it.
+# shellcheck disable=SC2016
+#   Every single-quoted `$` below is fixture content — it is written verbatim into a
+#   generated verify.sh and expanded when THAT script runs, never here. Disabled for the
+#   whole file rather than at eight sites because emitting scripts is what this file does,
+#   and a directive per case goes stale the moment a tenth is added.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 SCRIPT="$PWD/check-conformance.sh"
@@ -79,7 +84,6 @@ else bad "a body running without errexit is caught" "expected non-zero naming 'p
 
 # 3. A dispatcher that swallows the target's status. errexit is on and the body is fine; the
 #    silencing happens one level up, which is the harder of the two to notice by reading.
-# shellcheck disable=SC2016  # the ${…} is fixture content written into a generated script
 fx_reset; FX_DISPATCH='"target_${1}" || true'
 run_fixture
 if [[ $rc -ne 0 && "$out" == *"propagates"* ]]; then ok "a dispatcher swallowing the status is caught"
@@ -87,7 +91,6 @@ else bad "a dispatcher swallowing the status is caught" "expected non-zero namin
 
 # 4. The bare `<name>()` convention. A script that never adopted the target_ prefix is still
 #    conformant; the check discovers the name rather than dictating it.
-# shellcheck disable=SC2016  # fixture content
 fx_reset
 FX_FNDEF='lint() {
   true
@@ -98,7 +101,6 @@ if [[ $rc -eq 0 ]]; then ok "a bare <name>() function is discovered"
 else bad "a bare <name>() function is discovered" "exit $rc: $out"; fi
 
 # 5. The trailing-underscore convention, which a script adopts to dodge the `test` builtin.
-# shellcheck disable=SC2016  # fixture content
 fx_reset
 FX_FNDEF='lint_() {
   true
@@ -112,7 +114,6 @@ else bad "a <name>_() function is discovered" "exit $rc: $out"; fi
 #    line it sits at file scope, runs at definition time, and aborts the script before dispatch —
 #    a non-zero exit for entirely the wrong reason, which is a pass this check must not award.
 #    The fixture proves the right one by making the body succeed and the plant the only failure.
-# shellcheck disable=SC2016  # fixture content
 fx_reset
 FX_FNDEF='lint() { true; }'
 FX_DISPATCH='"${1}"'
@@ -123,7 +124,6 @@ else bad "a one-line function body is patched inside the braces" "exit $rc: $out
 # 7. No function matches any convention. This must FAIL LOUDLY. The old plant inserted nothing
 #    here and the assertion passed on an unrelated exit status — the vacuous pass this check
 #    exists to catch, exhibited by the check itself.
-# shellcheck disable=SC2016  # fixture content
 fx_reset
 FX_FNDEF='do_the_lint() {
   true
