@@ -185,14 +185,18 @@ awk '
   }
 ' "$WORKFLOW" > "$TMP/gate.sh"
 [[ -s "$TMP/gate.sh" ]] || { echo "FAIL: extracted an empty gate script — did the step name change?"; exit 1; }
-chmod +x "$TMP/gate.sh"
 
 # verdict <allowed> <commits> <deps-json> -> echoes the verdict, or "STEP-FAILED"
 verdict() {
   local out
   : > "$TMP/gh_output"
+  # `bash -e`, as GitHub invokes a run: block (`shell: /usr/bin/bash -e {0}`) and as the disarm
+  # harness above does. The extracted script sets its own `-euo pipefail` today; running it under
+  # a plain shell would mean that if someone ever removed that line — reasoning that GitHub
+  # supplies -e already — the step would still fail closed on GitHub while this suite quietly
+  # stopped checking that it does.
   if out="$( ALLOWED="$1" PR_COMMITS="$2" DEPS_JSON="$3" GITHUB_OUTPUT="$TMP/gh_output" \
-             bash "$TMP/gate.sh" 2>&1 )"; then
+             bash -e "$TMP/gate.sh" 2>&1 )"; then
     sed -n 's/^verdict=//p' "$TMP/gh_output"
   else
     echo "STEP-FAILED: $out"
@@ -205,10 +209,17 @@ ACTIONS='[{"dependencyName":"a","packageEcosystem":"github_actions","updateType"
 MIXED='[{"dependencyName":"a","packageEcosystem":"npm_and_yarn","updateType":"version-update:semver-patch"},
         {"dependencyName":"b","packageEcosystem":"github_actions","updateType":"version-update:semver-patch"}]'
 
-vcheck() { # name expected-substring allowed commits deps
+# Substring matching for the not-eligible reasons, EXACT for "eligible" — because "eligible" is a
+# substring of every "not-eligible: …" verdict, so a substring assertion on the positive path
+# passes when the gate has inverted. Those two cases are the only ones covering the decision that
+# arms an unattended merge, which is the worst place to hold a vacuous assertion.
+vcheck() { # name expected allowed commits deps
   local got; got="$(verdict "$3" "$4" "$5")"
-  if [[ "$got" == *"$2"* ]]; then printf 'ok   %-40s\n' "$1"
-  else printf 'FAIL %-40s expected ~%q, got %q\n' "$1" "$2" "$got"; fails=$((fails + 1)); fi
+  local hit=1
+  if [[ "$2" == "eligible" ]]; then [[ "$got" == "eligible" ]] && hit=0
+  else [[ "$got" == *"$2"* ]] && hit=0; fi
+  if [[ $hit -eq 0 ]]; then printf 'ok   %-40s\n' "$1"
+  else printf 'FAIL %-40s expected %q, got %q\n' "$1" "$2" "$got"; fails=$((fails + 1)); fi
 }
 
 vcheck "an allowed patch bump is eligible"      "eligible"                    "npm_and_yarn" 1 "$PATCH"

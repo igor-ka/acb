@@ -4,12 +4,20 @@
 # error propagation are identical in a Swift repository and a Terraform one, while the checks
 # themselves have nothing in common.
 #
-# It runs each verify.sh three times — `--targets`, an unknown target, and one real target with a
-# `false` planted as its first statement — and every one of the three exits immediately. Asking
-# "does target X dispatch?" by RUNNING target X was the first design and it is wrong for any
-# repository whose targets do something: it re-runs the install, the build and the image push
-# inside a metadata job on every pull request. The known-target set is read through `--targets`
-# instead, which is also stronger — it sees a target the script has and the declaration does not.
+# THE TRICK THAT MAKES IT CHEAP. It writes one patched copy of each verify.sh with `false` injected
+# as the first statement of EVERY function, then runs targets against that copy. Every run exits
+# immediately, so a repository whose targets install dependencies and build images pays nothing —
+# and one probe now answers both questions at once:
+#
+#   exit 64          the dispatcher does not know this target        (a CI step that cannot run)
+#   exit 0           it knows it, but the failure did not propagate  (a check that cannot fail)
+#   anything else    it knows it, and a failure reaches the status   (correct)
+#
+# Probing by *running the real target* was the first design and it is wrong for any repository
+# whose targets do something. Comparing `--targets` against the declaration instead was the
+# second, and it was worse: it verified the script→declaration direction and silently dropped
+# declaration→dispatch, so a target listed in TARGETS but missing from the dispatcher passed.
+# Both directions are checked here, and neither costs a build.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -27,24 +35,6 @@ bad() { fail=$((fail + 1)); printf '  ✗ %s — %s\n' "$1" "$2"; }
 # but the last patched copy would survive a failure.
 trap 'rm -f ./*/.acb-conformance.sh' EXIT
 
-# The function implementing a target, by the three conventions a real script uses, in this fixed
-# and documented order: the skeleton's own prefix; the trailing underscore a script adopts to
-# dodge a shell builtin (`test`); the plain name.
-#
-# It returns the exact string the plant below searches for, not just the name — so discovery and
-# patching cannot disagree about what they matched, which is how the plant came to insert nothing
-# while the assertion still reported a pass.
-target_fn_prefix() {
-  local script="$1" name="$2" cand
-  for cand in "target_$name" "${name}_" "$name"; do
-    if awk -v fn="$cand() {" 'index($0, fn) == 1 { found = 1 } END { exit !found }' "$script"; then
-      printf '%s() {\n' "$cand"
-      return 0
-    fi
-  done
-  return 1
-}
-
 for id in $(jq -r '.components[]?.id' "$ACB_CONFIG"); do
   v="$id/verify.sh"
 
@@ -52,9 +42,54 @@ for id in $(jq -r '.components[]?.id' "$ACB_CONFIG"); do
   if [[ -x "$v" ]]; then ok "$id: verify.sh is executable"
   else bad "$id: verify.sh is executable" "missing or not +x"; continue; fi
 
-  # 2. The script's own target list and the declaration agree, in BOTH directions. A declared
-  #    target the script does not know is a CI step that cannot run; a target the script knows and
-  #    nothing declares is a check nobody calls. Read, never executed.
+  # 2. Build the patched copy: `false` inside the opening brace of every function.
+  #
+  #    INSIDE the brace, not printed on the line after it. `install() { run npm ci; }` is a
+  #    complete definition on one line, and a `false` printed after it lands at file scope, where
+  #    it runs at definition time and aborts the script before dispatch — a non-zero exit for
+  #    entirely the wrong reason, which is a pass this check must not award.
+  #
+  #    EVERY function, not one chosen by name. Naming conventions differ (`target_lint`, `lint_`,
+  #    `lint`, `do_the_lint`) and a check that has to guess the name is a check that silently
+  #    patches nothing when it guesses wrong — an assertion that then passes on an unrelated
+  #    non-zero exit. That is the exact defect this file exists to catch, and it has exhibited it.
+  #
+  #    Written INSIDE the component directory, not in /tmp: the script's own `cd "$(dirname "$0")"`
+  #    is what makes its relative paths work. The original is never written to.
+  tmp="$id/.acb-conformance.sh"
+  awk '
+    /^[A-Za-z_][A-Za-z0-9_:]*[[:space:]]*\([[:space:]]*\)[[:space:]]*\{/ { sub(/\{/, "{ false;") }
+    { print }
+  ' "$v" > "$tmp"
+  chmod +x "$tmp"
+  # The patch must have changed something. This is the guard that holds however the conventions
+  # evolve: a patch that inserts nothing produces assertions that pass vacuously.
+  if cmp -s "$v" "$tmp"; then
+    bad "$id: the failure probe patches something" "no function definitions found in $v"
+    continue
+  fi
+  ok "$id: the failure probe patches something"
+
+  # 3. An undeclared target is rejected, and rejected distinguishably. Exit 64 means "unknown
+  #    target"; 2 is "declared but not implemented yet", and one shared code makes this vacuous.
+  #
+  #    FIRST of the runs, deliberately. A dispatcher that falls through to `all` on an unrecognised
+  #    argument would otherwise run the whole build when probed with `--targets` below. Against the
+  #    patched copy it fails instantly instead, and this assertion is what reports it.
+  ( cd "$id" && "./$(basename "$tmp")" __no_such_target__ >/dev/null 2>&1 ); rc=$?
+  if [[ $rc -eq 64 ]]; then
+    ok "$id: unknown target exits 64"
+  else
+    bad "$id: unknown target exits 64" \
+        "got $rc — either the dispatcher does not use 64, or something outside a function failed first"
+    continue
+  fi
+
+  # 4. The script's own target list matches the declaration. Read from the ORIGINAL: a consumer may
+  #    implement `--targets` as a function, which the patched copy would have disabled. Safe to run
+  #    unpatched now that assertion 3 has established unknown arguments exit rather than fall
+  #    through. This is the script→declaration direction — a target the script knows and nothing
+  #    declares is a check nobody calls.
   declared="$(jq -r --arg i "$id" '.components[]|select(.id==$i)|.targets[]' \
               "$ACB_CONFIG" | LC_ALL=C sort)"
   actual="$( ( cd "$id" && ./verify.sh --targets ) 2>/dev/null | LC_ALL=C sort )"
@@ -68,57 +103,27 @@ for id in $(jq -r '.components[]?.id' "$ACB_CONFIG"); do
         "declared [$(echo "$declared" | tr '\n' ' ')] vs --targets [$(echo "$actual" | tr '\n' ' ')]"
   fi
 
-  # 3. An undeclared target is rejected, and rejected distinguishably. Exit 64 means "unknown
-  #    target"; 2 is "declared but not implemented yet", and one shared code makes this vacuous.
-  ( cd "$id" && ./verify.sh __no_such_target__ >/dev/null 2>&1 ); rc=$?
-  if [[ $rc -eq 64 ]]; then ok "$id: unknown target exits 64"
-  else bad "$id: unknown target exits 64" "got $rc"; fi
-
-  # 4. A failure inside a target propagates to the script's exit status.
+  # 5. Every declared target dispatches, and a failure inside it reaches the exit status. The
+  #    declaration→dispatch direction, and the one that costs nothing because the body is `false`.
   #
-  #    Be precise about what this proves, because the tempting overclaim is wrong. It plants a
-  #    `false` as the first statement of the target body and requires a non-zero exit. That
-  #    catches the two structural ways a target can become unable to fail: a body running without
+  #    Be precise about what the propagation half proves, because the tempting overclaim is wrong.
+  #    It catches the two structural ways a target becomes unable to fail: a body running without
   #    `errexit`, where an early failure is ignored and a later success sets the status; and a
-  #    dispatcher that swallows the target's status (`"target_$1" || true`).
-  #
-  #    It does NOT prove an individual check can fail. `grep -q x file || true` inside the body
-  #    still exits 0 on its own, and this assertion will not see it — detecting that needs
-  #    mutation of the checks themselves, which is a different tool. Reviewers catch those; this
-  #    catches the plumbing that would silence all of them at once.
-  #
-  #    The FIRST declared target is used, and being first is what keeps this cheap: `false` fires
-  #    before the body's real work starts, so the run costs nothing however heavy the target is.
-  #
-  #    The patched copy is written INSIDE the component directory, not in /tmp. The script's own
-  #    `cd "$(dirname "$0")"` is what makes its relative paths work, so a copy elsewhere would run
-  #    the target against the wrong directory and prove nothing. The original is never written to.
-  first="$(jq -r --arg i "$id" '.components[]|select(.id==$i)|.targets[0]' "$ACB_CONFIG")"
-  if ! prefix="$(target_fn_prefix "$v" "$first")"; then
-    bad "$id: a failure inside '$first' propagates" \
-        "no function implements it — tried target_${first}(), ${first}_() and ${first}(). Name it one of those."
-    continue
-  fi
-  tmp="$id/.acb-conformance.sh"
-  # Injected INSIDE the opening brace, not printed on the following line. `install() { run npm ci; }`
-  # is a complete definition on one line, and a `false` printed after it lands at file scope: it
-  # runs at definition time and aborts the script before dispatch — a non-zero exit for entirely
-  # the wrong reason. Rewriting the brace is correct for both shapes and needs no special case.
-  awk -v fn="$prefix" '
-    !done && index($0, fn) == 1 { sub(/\{/, "{ false;"); done = 1 }
-    { print }
-  ' "$v" > "$tmp"
-  # The plant must have changed something. This is the guard that holds however the naming
-  # conventions evolve: a patch that silently inserts nothing produces an assertion that passes
-  # vacuously, which is the exact defect this check exists to catch and has exhibited once.
-  if cmp -s "$v" "$tmp"; then
-    bad "$id: a failure inside '$first' propagates" "the planted 'false' changed nothing"
-    continue
-  fi
-  chmod +x "$tmp"
-  ( cd "$id" && "./$(basename "$tmp")" "$first" >/dev/null 2>&1 ); rc=$?
-  if [[ $rc -ne 0 ]]; then ok "$id: a failure inside '$first' propagates"
-  else bad "$id: a failure inside '$first' propagates" "exit 0 with a planted 'false'"; fi
+  #    dispatcher that swallows the target's status (`"target_$1" || true`). It does NOT prove an
+  #    individual check can fail — `grep -q x file || true` inside the body still exits 0, and this
+  #    will not see it. Detecting that needs mutation of the checks themselves, which is a
+  #    different tool. Reviewers catch those; this catches the plumbing that would silence all of
+  #    them at once.
+  for t in $(jq -r --arg i "$id" '.components[]|select(.id==$i)|.targets[]' "$ACB_CONFIG"); do
+    ( cd "$id" && "./$(basename "$tmp")" "$t" >/dev/null 2>&1 ); rc=$?
+    if [[ $rc -eq 64 ]]; then
+      bad "$id: '$t' dispatches and can fail" "exit 64 — declared, but the dispatcher does not know it"
+    elif [[ $rc -eq 0 ]]; then
+      bad "$id: '$t' dispatches and can fail" "exit 0 with a planted 'false' — the failure was swallowed"
+    else
+      ok "$id: '$t' dispatches and can fail"
+    fi
+  done
 done
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

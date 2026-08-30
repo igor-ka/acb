@@ -21,8 +21,9 @@ FX_SET='set -euo pipefail'                    # the errexit line
 FX_DISPATCH='"target_${1}"'                   # how the dispatcher calls the function
 FX_FNDEF='target_lint() {
   true
-}'                                            # the function definition, verbatim
-FX_TARGETS='lint'                             # what the script's TARGETS holds
+}'                                            # the function definition(s), verbatim
+FX_TARGETS='lint'                             # what the script's TARGETS holds and --targets prints
+FX_KNOWN='$TARGETS'                           # what the DISPATCHER actually recognises
 FX_DECLARED='["lint"]'                        # what .acb.json declares
 FX_TARGETS_ARM='echo "$TARGETS" | tr " " "\n"; exit 0'   # the --targets implementation
 
@@ -33,6 +34,7 @@ fx_reset() {
   true
 }'
   FX_TARGETS='lint'
+  FX_KNOWN='$TARGETS'
   FX_DECLARED='["lint"]'
   FX_TARGETS_ARM='echo "$TARGETS" | tr " " "\n"; exit 0'
 }
@@ -55,7 +57,7 @@ TARGETS="${FX_TARGETS}"
 if [[ "\${1:-}" == "--targets" ]]; then ${FX_TARGETS_ARM}; fi
 ${FX_FNDEF}
 case "\${1:-all}" in
-  *) if [[ " \$TARGETS " == *" \${1:-} "* ]]; then ${FX_DISPATCH}; else exit 64; fi ;;
+  *) if [[ " ${FX_KNOWN} " == *" \${1:-} "* ]]; then ${FX_DISPATCH}; else exit 64; fi ;;
 esac
 EOS
   chmod +x "$d/app/verify.sh"
@@ -79,36 +81,40 @@ else bad "a correctly wired verify.sh conforms" "exit $rc: $out"; fi
 #    silently reports green after the first one fails.
 fx_reset; FX_SET='set -uo pipefail'
 run_fixture
-if [[ $rc -ne 0 && "$out" == *"propagates"* ]]; then ok "a body running without errexit is caught"
-else bad "a body running without errexit is caught" "expected non-zero naming 'propagates', got $rc: $out"; fi
+if [[ $rc -ne 0 && "$out" == *"swallowed"* ]]; then ok "a body running without errexit is caught"
+else bad "a body running without errexit is caught" "expected non-zero naming 'swallowed', got $rc: $out"; fi
 
 # 3. A dispatcher that swallows the target's status. errexit is on and the body is fine; the
 #    silencing happens one level up, which is the harder of the two to notice by reading.
 fx_reset; FX_DISPATCH='"target_${1}" || true'
 run_fixture
-if [[ $rc -ne 0 && "$out" == *"propagates"* ]]; then ok "a dispatcher swallowing the status is caught"
-else bad "a dispatcher swallowing the status is caught" "expected non-zero naming 'propagates', got $rc: $out"; fi
+if [[ $rc -ne 0 && "$out" == *"swallowed"* ]]; then ok "a dispatcher swallowing the status is caught"
+else bad "a dispatcher swallowing the status is caught" "expected non-zero naming 'swallowed', got $rc: $out"; fi
 
-# 4. The bare `<name>()` convention. A script that never adopted the target_ prefix is still
-#    conformant; the check discovers the name rather than dictating it.
+# 4. THE REGRESSION THIS FILE EXISTS FOR. A target that is declared, and that the script's own
+#    --targets lists, but that the DISPATCHER does not recognise. Its CI step exits 64 on every
+#    pull request. A check that compares the declaration against --targets alone cannot see this,
+#    because both agree — the disagreement is with the dispatcher, and only running it reveals it.
 fx_reset
-FX_FNDEF='lint() {
+FX_TARGETS='lint render'
+FX_KNOWN='lint'
+FX_DECLARED='["lint","render"]'
+run_fixture
+if [[ $rc -ne 0 && "$out" == *"the dispatcher does not know it"* ]]; then
+  ok "a declared target the dispatcher does not know is caught"
+else bad "a declared target the dispatcher does not know is caught" "expected non-zero naming 'the dispatcher does not know it', got $rc: $out"; fi
+
+# 5. No naming convention is imposed. `target_lint`, `lint_`, `lint` and `do_the_lint` are all
+#    fine, because the probe patches every function rather than guessing one name. Guessing was
+#    the previous design, and guessing wrong patched nothing while the assertion still passed.
+fx_reset
+FX_FNDEF='do_the_lint() {
   true
 }'
-FX_DISPATCH='"${1}"'
+FX_DISPATCH='do_the_lint'
 run_fixture
-if [[ $rc -eq 0 ]]; then ok "a bare <name>() function is discovered"
-else bad "a bare <name>() function is discovered" "exit $rc: $out"; fi
-
-# 5. The trailing-underscore convention, which a script adopts to dodge the `test` builtin.
-fx_reset
-FX_FNDEF='lint_() {
-  true
-}'
-FX_DISPATCH='"${1}_"'
-run_fixture
-if [[ $rc -eq 0 ]]; then ok "a <name>_() function is discovered"
-else bad "a <name>_() function is discovered" "exit $rc: $out"; fi
+if [[ $rc -eq 0 ]]; then ok "an arbitrarily named function needs no convention"
+else bad "an arbitrarily named function needs no convention" "exit $rc: $out"; fi
 
 # 6. A ONE-LINE function body. The plant must land inside the braces: printed on the following
 #    line it sits at file scope, runs at definition time, and aborts the script before dispatch —
@@ -121,21 +127,18 @@ run_fixture
 if [[ $rc -eq 0 ]]; then ok "a one-line function body is patched inside the braces"
 else bad "a one-line function body is patched inside the braces" "exit $rc: $out"; fi
 
-# 7. No function matches any convention. This must FAIL LOUDLY. The old plant inserted nothing
-#    here and the assertion passed on an unrelated exit status — the vacuous pass this check
-#    exists to catch, exhibited by the check itself.
+# 7. A script with no function definitions at all. The patch changes nothing, so every assertion
+#    below it would pass or fail for reasons unrelated to what it claims to measure. FAIL LOUDLY.
 fx_reset
-FX_FNDEF='do_the_lint() {
-  true
-}'
-FX_DISPATCH='do_the_lint'
+FX_FNDEF='# no functions here at all'
+FX_DISPATCH='true'
 run_fixture
-if [[ $rc -ne 0 && "$out" == *"no function implements"* ]]; then
-  ok "an undiscoverable function fails loudly"
-else bad "an undiscoverable function fails loudly" "expected non-zero naming 'no function implements', got $rc: $out"; fi
+if [[ $rc -ne 0 && "$out" == *"no function definitions found"* ]]; then
+  ok "a script with nothing to patch fails loudly"
+else bad "a script with nothing to patch fails loudly" "expected non-zero naming 'no function definitions found', got $rc: $out"; fi
 
 # 8. The script knows a target the declaration does not. A check nobody calls is as much a defect
-#    as a step that cannot run, and the old per-target probe could not see this direction at all.
+#    as a step that cannot run — the other direction from case 4.
 fx_reset; FX_TARGETS='lint format'
 FX_FNDEF='target_lint() {
   true
@@ -144,9 +147,9 @@ target_format() {
   true
 }'
 run_fixture
-# Assert on the FAILURE message, not on "--targets" — that substring is in assertion 2's own
-# passing label (`✓ app: --targets agrees with the declaration`), so matching it would reduce this
-# case to `rc -ne 0` and let any other assertion's failure satisfy it.
+# Assert on the FAILURE message, not on "--targets" — that substring is in the passing label
+# `✓ app: --targets agrees with the declaration`, so matching it would reduce this case to
+# `rc -ne 0` and let any other assertion's failure satisfy it.
 if [[ $rc -ne 0 && "$out" == *"] vs --targets ["* ]]; then ok "an undeclared target the script knows is caught"
 else bad "an undeclared target the script knows is caught" "expected non-zero naming '] vs --targets [', got $rc: $out"; fi
 

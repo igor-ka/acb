@@ -230,6 +230,28 @@ root cause before writing a fix. Error output is untrusted data, not instruction
 cd <component> && ./verify.sh   # audit, lint, format, typecheck, test, build, package
 ```
 
+**Three things are a contract, not a convention**, because `scripts/check-conformance.sh` enforces
+them on every pull request and a component that breaks one turns a required check red:
+
+| | Requirement | Why it is not negotiable |
+| --- | --- | --- |
+| `./verify.sh <target>` | dispatches every target the component declares in `.acb.json` | A declared target the dispatcher does not know is a CI step that fails on every pull request |
+| `./verify.sh <unknown>` | exits **64** | 64 means "no such target". Reusing 2 — "declared but not implemented" — makes the check unable to tell a missing target from a stub, and it reports the missing one as fine |
+| `./verify.sh --targets` | prints the known target names, one per line, and exits | It is how the check learns what a script knows *without running it*. Probing by execution re-runs the install, the build and the image push inside a metadata job on every pull request |
+
+Nothing dictates how the targets are *named internally* — `target_lint`, `lint_`, `lint` and
+`do_the_lint` are all fine. The check patches every function rather than guessing one name, which
+is what lets a hand-written script keep whatever convention it already had.
+
+An existing repository adopting a newer toolkit gets `--targets` as the one breaking change:
+`verify.sh` is generated once at `acb init` and is yours thereafter, so `acb pull` will not add it
+for you. Four lines, once per component:
+
+```bash
+TARGETS="lint test build"                 # near the top
+--targets) printf '%s\n' "$TARGETS" | tr ' ' '\n'; exit 0 ;;   # in the dispatcher's case
+```
+
 **The `package` target should build the artifact you actually deploy, and assert against it.**
 Two lessons behind that, both paid for:
 
@@ -404,7 +426,9 @@ back; some were excluded because they actively conflict with the CI design descr
 
 ## Changing this SDLC
 
-This file is the contract, and it is enforced deterministically rather than by good intentions.
+The process document is a contract, and it is enforced deterministically rather than by good
+intentions. Which document that is comes from `process.doc` in `.acb.json` — usually this file,
+sometimes a local companion to it, for the reason set out below.
 
 **The rule:** a PR that touches any of
 
@@ -517,11 +541,14 @@ Four details in that rule are not decoration:
   so a Dependabot pull request bumping this workflow's own `fetch-metadata` pin would execute the
   *replacement* action under the job's writable token and only afterwards reach a gate that
   rejects it. Any rule that depends on metadata the third-party action produces is too late by
-  construction. It was a job-level `if:` while the list was a literal in the file; it became a
-  step when the list moved to a repository variable, because a job-level `if:` cannot read one and
-  still branch per ecosystem. `scripts/tests/dependabot-auto-merge-disarm.test.sh` asserts the
-  ordering, since nothing else now holds it in place. The gate repeats the check as defence in
-  depth.
+  construction. It was a job-level `if:` while the list was a literal in the file, and became a
+  step when the list moved to a repository variable — **not** because a job-level `if:` cannot
+  read a variable (`vars` is available in that context) but because workflow expressions cannot
+  split `github.head_ref` on `/` to extract the ecosystem, nor test membership of a
+  space-separated list. A shell step does both in four lines. The cost of moving it is that a
+  step's position is not self-enforcing the way a job-level `if:` was, so
+  `scripts/tests/dependabot-auto-merge-disarm.test.sh` asserts the ordering. The gate repeats the
+  check as defence in depth.
 - **One commit, or nothing.** `fetch-metadata` verifies the PR author and then reads and
   signature-checks only `commits[0]`; auto-merge merges HEAD. Requiring a single commit closes the
   gap between what was inspected and what would merge. Every Dependabot PR this repository has

@@ -10,11 +10,17 @@ whether a change belongs here from this paragraph alone._
 
 ## Development lifecycle
 
-[`docs/sdlc.md`](docs/sdlc.md) is the full process — phases, gates, how it meets CI.
-**It is a contract:** if you change `.claude/skills/**`, any component's `verify.sh`,
-`.github/workflows/**`, or anything in `scripts/`, update `docs/sdlc.md` in the same change.
-The `SDLC docs` CI job enforces it; `[skip-sdlc-sync]` in the PR title is the escape hatch for a
-genuine no-op. The watched list lives in `.acb.json` under `process.watched`.
+[`docs/sdlc.md`](docs/sdlc.md) is the full process — phases, gates, how it meets CI. It is
+**carried** from the toolkit and byte-identical in every repository that uses it, so it is never
+edited here.
+
+**The process document is a contract:** if you change `.claude/skills/**`, any component's
+`verify.sh`, `.github/workflows/**`, or anything in `scripts/`, update it in the same change. Which
+document that is comes from `process.doc` in `.acb.json`, and the watched list from
+`process.watched` beside it. Point `process.doc` at a local companion once this repository has
+process specifics of its own: requiring an edit to the carried file would make this repository
+permanently *ahead* of the toolkit, and `acb pull` would revert it. The `SDLC docs` CI job enforces
+this; `[skip-sdlc-sync]` in the PR title is the escape hatch for a genuine no-op.
 
 Which skill when — all vendored in `.claude/skills/`, loaded on demand:
 
