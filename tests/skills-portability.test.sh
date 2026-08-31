@@ -10,7 +10,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-TREES="carried/.claude/skills carried/docs"
+TREES="carried/.claude/commands carried/.claude/skills carried/docs"
 
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); printf '  ✓ %s\n' "$1"; }
