@@ -303,7 +303,11 @@ export { fc };
 ```
 
 Make it enforceable rather than aspirational — a direct `import fc from "fast-check"` elsewhere
-silently gets a fresh seed per run:
+silently gets a fresh seed per run. Whatever linter the repository uses, forbid importing the
+library anywhere but that one module.
+
+<!-- portability-exempt: a lint rule cannot be written without naming a linter; the principle above
+     is the portable part, and this is one instantiation of it. -->
 
 ```js
 // eslint.config.js
@@ -318,6 +322,8 @@ silently gets a fresh seed per run:
   },
 }
 ```
+
+<!-- /portability-exempt -->
 
 ### Gotchas
 
