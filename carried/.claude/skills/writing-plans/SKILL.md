@@ -73,6 +73,11 @@ changes that make sense independently.
 
 **Tech Stack:** [Key technologies/libraries]
 
+**Human dependencies:** [Credentials, accounts, approvals and by-hand operations this plan needs
+from a person — one line each, naming what is needed and which task blocks on it. **Omit this
+field entirely when there are none.** A plan carrying it in every repository, reading "none"
+forever, is the ceremony this process exists to cut.]
+
 **PR boundaries:** [The pull requests this plan produces — one line each, naming the child
 issue each one closes. "PR 1: quota seam + in-memory store — closes #64". One child per PR.
 Where two children genuinely cannot be separated, say so here and say why.]
@@ -86,6 +91,48 @@ point the only remaining moves are splitting completed work or reaching for an e
 Naming the PRs here puts the decision in front of a human at the plan review, before any code
 exists. The `PR shape` CI check enforces the same rule at merge time, but it is a backstop; this
 is the control.
+
+**Why `Human dependencies` is conditional and `PR boundaries` is not.** Every plan produces pull
+requests; not every plan needs something a person alone can supply. Where the field applies it is
+load-bearing — it is the difference between a plan that stops at a known boundary and one that
+discovers the boundary mid-run — and where it does not, a line reading "none" is noise in every
+plan in every repository that ever uses this template.
+
+## Definition of done
+
+**Every plan MUST end with a `## Definition of done` section.** It is a coverage map, not a copy
+of the criteria:
+
+```markdown
+## Definition of done
+
+| Spec criterion | How this plan satisfies it |
+| --- | --- |
+| S1 | Task 4 Step 5 — the end-to-end run, against the real integration rather than a fixture. |
+| S3 | Task 7 Steps 1-5. |
+| S7 | Structural: the shape of the change makes the failure unreachable. |
+
+**Not claimed:** S2, S4-S6 closed by an earlier plan. S8 is a launch-day measurement.
+```
+
+Two rules make it a map rather than a second copy:
+
+- **Never restate a criterion.** Name it by its identifier and point at the task that discharges
+  it. A pasted criterion is a second copy that goes stale, and the stale copy is the one people
+  read.
+- **The `Not claimed` line is mandatory**, and it must account for every criterion in the spec the
+  table omits. "The spec has eight, this plan claims three" is a complete sentence only when the
+  other five are named.
+
+**Why this belongs in the plan and not in the reader's head.** A spec's criteria define done for
+the *whole* problem; a plan is usually one phase of it. Without this table nothing states which
+criteria a given implementation run must reach, so the boundary gets reconstructed from context
+every time — by the reviewer, by a reader six months later, and by any unattended process working
+the plan. Naming the split once turns "is this done?" into a lookup.
+
+**When there is no separate spec** — the process document says a plan absorbs the spec when
+requirements are clear — the left column is the plan's own Goal, decomposed into checkable
+statements. The section is never omitted.
 
 ## Task Structure
 
