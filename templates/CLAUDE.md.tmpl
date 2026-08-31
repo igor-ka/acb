@@ -38,6 +38,13 @@ Which skill when — all vendored in `.claude/skills/`, loaded on demand:
 
 The standing bar every change clears is `.claude/skills/references/definition-of-done.md`.
 
+**Tests: the oracle must not come from the implementation.** A test's oracle — whatever decides pass
+from fail — has exactly three legal sources: written first, a document, or a second implementation.
+Never ask for tests after the code; never edit an existing test to make it pass; mock only at
+process boundaries, and _name this repository's boundaries below_. The full reasoning is in
+[`docs/sdlc.md`](docs/sdlc.md) under *The oracle must not come from the implementation*; it is
+summarised here because this file is loaded every session and that one is read on demand.
+
 ## Sensitive paths
 
 _List the paths where a change needs the threat-model pass before implementation — the token
