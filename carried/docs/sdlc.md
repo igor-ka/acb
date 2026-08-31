@@ -20,6 +20,7 @@ is allocated to the weakest layer that can still hold it.
 | --- | --- | --- |
 | **Enforced** | `verify.sh`, `.github/workflows/ci.yml`, the "Protect main" ruleset | Deterministic. Cannot be talked out of, forgotten, or skipped under deadline pressure. |
 | **Procedural** | `.claude/skills/*` | Loaded on demand, only when relevant. Keeps long procedure out of always-on context. |
+| **Invoked** | `.claude/commands/*` | Run deliberately, by name, with an argument. `/loop-plan <plan path>` works a plan to the criteria its `## Criteria coverage` claims, and stops when they pass with evidence, when a `Human dependencies` entry blocks, or at its tick ceiling. |
 | **Always-on** | `CLAUDE.md` | Policy and routing only. Every line competes for attention, so it stays small. |
 
 If something *must* happen, it belongs in the enforced layer. `CLAUDE.md` explains the gates;

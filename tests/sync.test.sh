@@ -284,7 +284,7 @@ cat > "$wc_dir/.acb.json" <<'JSON'
   "components": [] }
 JSON
 watched_in "$wc_dir" "$wt"
-if grep -q 'every carried .claude/ tree is governed' <<<"$out"; then ok "a fully covered set reports in sync"
+if grep -q 'every carried path is governed' <<<"$out"; then ok "a fully covered set reports in sync"
 else bad "a fully covered set reports in sync" "$out"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
