@@ -112,12 +112,16 @@ else bad "a fresh directory still initialises" "exit $rc: $out"; fi
 # initialised afterwards ships an ungoverned tree. The source here is MANIFEST, not a copy.
 w="$(mktemp -d)"
 ( cd "$w" && acb_scaffold_config >/dev/null 2>&1 )
-scaf="$(jq -r '[.process.watched[]] | join("|")' "$w/.acb.json")"
+scaf="$(jq -r '[.process.watched[]] | join("|")' "$w/.acb.json" 2>/dev/null)"
+# Without this the block passes vacuously if the scaffold ever fails: grep -qE "" matches anything.
+if [[ -z "$scaf" ]]; then bad "the scaffold writes a watched list" "acb_scaffold_config produced none"; fi
 while read -r d; do
-  [[ -n "$d" ]] || continue
-  if grep -qE "$scaf" <<<"$d/probe.md"; then ok "the scaffold watches $d/"
-  else bad "the scaffold watches $d/" "no process.watched pattern matches the carried tree"; fi
-done < <(sed -n 's|^\(\.claude/[^/]*\)/.*|\1|p' MANIFEST | LC_ALL=C sort -u)
+  [[ -n "$d" && -n "$scaf" ]] || continue
+  [[ "$d" == */ ]] && probe="${d}probe.md" || probe="$d"
+  if grep -qE "$scaf" <<<"$probe"; then ok "the scaffold watches $d"
+  else bad "the scaffold watches $d" "no process.watched pattern matches the carried tree"; fi
+done < <(sed -n -e 's|^\(\.claude/[^/]*\)/.*|\1/|p' -e 's|^\(\.claude/[^/]*\)$|\1|p' \
+           MANIFEST | LC_ALL=C sort -u)
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

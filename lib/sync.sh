@@ -139,13 +139,23 @@ acb_check_drift() {
 # governed by being `process.doc`, and reporting it would make this check noise — and a check that
 # fires on everything is one people learn to bypass.
 acb_check_watched() {
-  local re gaps=() d
-  re="$(acb_process_arr watched | tr '\n' '|')"; re="${re%|}"
-  [[ -n "$re" ]] || return 0
+  local re gaps=() d probe
+  # An empty pattern would build `a||b`, which GNU grep reads as "match everything" — every tree
+  # would then report governed. Dropped rather than trusted.
+  re="$(acb_process_arr watched | grep -v '^[[:space:]]*$' | tr '\n' '|')"; re="${re%|}"
+  if [[ -z "$re" ]]; then
+    echo "watched: process.watched is empty — the SDLC gate matches every changed file"
+    return 0
+  fi
+  # Both shapes: a directory under .claude/, and a file sitting directly in it. Enumerating only
+  # directories is how `.claude/settings.json` — the harness's own permission and hook config —
+  # would go ungoverned while this function printed that everything was.
   while read -r d; do
     [[ -n "$d" ]] || continue
-    grep -qE "$re" <<<"$d/probe.md" || gaps+=("$d/")
-  done < <(sed -n 's|^\(\.claude/[^/]*\)/.*|\1|p' "$ACB_ROOT/MANIFEST" | LC_ALL=C sort -u)
+    [[ "$d" == */ ]] && probe="${d}probe.md" || probe="$d"
+    grep -qE "$re" <<<"$probe" || gaps+=("$d")
+  done < <(sed -n -e 's|^\(\.claude/[^/]*\)/.*|\1/|p' -e 's|^\(\.claude/[^/]*\)$|\1|p' \
+             "$ACB_ROOT/MANIFEST" | LC_ALL=C sort -u)
   if ((${#gaps[@]})); then
     echo "watched: ${#gaps[@]} carried tree(s) outside process.watched — the SDLC gate reports"
     echo "  success without checking them. Add a pattern for each to .acb.json:"

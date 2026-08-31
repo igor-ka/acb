@@ -251,7 +251,8 @@ watched_in() {   # <consumer dir> <toolkit root> -> sets $out
 }
 
 wt="$(mktemp -d)"; ln -s "$REAL_ROOT/lib" "$wt/lib"
-printf '%s\n' '.claude/skills/a/SKILL.md' '.claude/commands/x.md' 'docs/sdlc.md' > "$wt/MANIFEST"
+printf '%s\n' '.claude/skills/a/SKILL.md' '.claude/commands/x.md' '.claude/settings.json' \
+        'docs/sdlc.md' > "$wt/MANIFEST"
 
 wc_dir="$(mktemp -d)"
 cat > "$wc_dir/.acb.json" <<'JSON'
@@ -264,6 +265,12 @@ if grep -q '\.claude/commands/' <<<"$out" && ! grep -q '\.claude/skills/' <<<"$o
   ok "an uncovered carried tree is named, a covered one is not"
 else bad "an uncovered carried tree is named, a covered one is not" "$out"; fi
 
+# A carried file sitting directly in .claude/ is a tree of one. Enumerating only directories is how
+# .claude/settings.json — the harness's own permission and hook config — would go ungoverned while
+# this function reported that everything was.
+if grep -q 'settings\.json' <<<"$out"; then ok "a carried file directly under .claude/ is named"
+else bad "a carried file directly under .claude/ is named" "$out"; fi
+
 # Carried docs/ must NOT be reported. It is the process document itself, governed by being
 # process.doc, and a check that fires on it is noise people learn to bypass.
 if ! grep -q 'docs/' <<<"$out"; then ok "carried docs/ is not reported as a gap"
@@ -272,7 +279,8 @@ else bad "carried docs/ is not reported as a gap" "$out"; fi
 cat > "$wc_dir/.acb.json" <<'JSON'
 { "template": { "repo": "example/repo", "commit": "0" },
   "process": { "doc": "docs/sdlc.md",
-               "watched": ["^\\.claude/skills/", "^\\.claude/commands/"] },
+               "watched": ["^\\.claude/skills/", "^\\.claude/commands/",
+                           "^\\.claude/settings\\.json$"] },
   "components": [] }
 JSON
 watched_in "$wc_dir" "$wt"
