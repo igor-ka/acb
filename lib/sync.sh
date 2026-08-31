@@ -47,6 +47,7 @@ acb_cmd_status() {
   fi
 
   acb_check_drift || status=1
+  acb_check_watched
   acb_check_ecosystems
   return $status
 }
@@ -123,6 +124,49 @@ acb_check_drift() {
     echo "drift: none"
   fi
   return 0
+}
+
+# `acb pull` copies carried files; it never edits `process.watched`, which belongs to the consumer.
+# So a release adding a carried tree hands every existing consumer a process document asserting the
+# tree is governed, next to a watched list that does not match it. The gate then reports success
+# while checking nothing — the decorative-gate shape.
+#
+# Every carried path is probed as itself, not as a synthetic `<tree>/probe.md`. Probing a synthesised
+# path reports a gap whenever the watched pattern is deeper than the tree name — `^\.github/workflows/`
+# against `.github/probe.md` — which looks like a scope problem and is really a technique problem.
+# The one exception is the process document's own directory. Naming only `process.doc` is not
+# enough: a consumer that points it at a local companion still carries `docs/sdlc.md`, which would
+# then report as a gap forever. Excluding the directory covers both arrangements, and the only
+# carried thing in it is the process document either way.
+acb_check_watched() {
+  local re doc docdir p gaps=() seen=""
+  if [[ ! -f "$ACB_ROOT/MANIFEST" ]]; then
+    echo "watched: cannot check — no MANIFEST at $ACB_ROOT"
+    return 0
+  fi
+  doc="$(acb_process doc)"; docdir="${doc%/*}/"
+  # An empty pattern would build `a||b`, which GNU grep reads as "match everything".
+  re="$(acb_process_arr watched | grep -v '^[[:space:]]*$' | tr '\n' '|')"; re="${re%|}"
+  while read -r p; do
+    [[ -n "$p" && "$p" != "$doc" && "$p" != "$docdir"* ]] || continue
+    [[ -n "$re" ]] && grep -qE "$re" <<<"$p" && continue
+    # Name the tree for a nested path, the file itself for one sitting directly in a namespace:
+    # telling an operator that `.claude/` is ungoverned would have them watch far more than the gap.
+    local t
+    case "$p" in
+      */*/*) t="${p%%/*}/"; t="$t$(cut -d/ -f2 <<<"$p")/" ;;
+      *)     t="$p" ;;
+    esac
+    case "$seen" in *"|$t|"*) continue ;; esac
+    seen="$seen|$t|"; gaps+=("$t")
+  done < "$ACB_ROOT/MANIFEST"
+  if ((${#gaps[@]})); then
+    echo "watched: ${#gaps[@]} carried path(s) outside process.watched — the SDLC gate reports"
+    echo "  success without checking them. Add a pattern for each to .acb.json:"
+    printf '    %s\n' "${gaps[@]}"
+  else
+    echo "watched: every carried path is governed"
+  fi
 }
 
 # The auto-merge allow-list lives in a repository variable, because that workflow has no checkout

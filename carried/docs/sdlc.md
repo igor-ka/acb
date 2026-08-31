@@ -3,8 +3,8 @@
 How a change gets from an idea to `main` in this repository, and which skill governs each step.
 
 This document is a **contract**. If you change the development process — the skills in
-`.claude/skills/`, any component's `verify.sh`, anything in `scripts/`, or a workflow in
-`.github/workflows/` — update **the document `process.doc` names in `.acb.json`** in the same
+`.claude/skills/`, the commands in `.claude/commands/`, any component's `verify.sh`, anything in
+`scripts/`, or a workflow in `.github/workflows/` — update **the document `process.doc` names in `.acb.json`** in the same
 change. That is usually this file; where a repository keeps its own process specifics separate, it
 is that companion instead. The `SDLC docs` CI job enforces it, and `CLAUDE.md` points at both.
 See [Changing this SDLC](#changing-this-sdlc).
@@ -20,6 +20,7 @@ is allocated to the weakest layer that can still hold it.
 | --- | --- | --- |
 | **Enforced** | `verify.sh`, `.github/workflows/ci.yml`, the "Protect main" ruleset | Deterministic. Cannot be talked out of, forgotten, or skipped under deadline pressure. |
 | **Procedural** | `.claude/skills/*` | Loaded on demand, only when relevant. Keeps long procedure out of always-on context. |
+| **Invoked** | `.claude/commands/*` | Run deliberately, by name, with an argument. `/loop-plan <plan path>` works a plan to the criteria its `## Criteria coverage` claims, and stops when they pass with evidence, when a `Human dependencies` entry blocks, or at its tick ceiling. |
 | **Always-on** | `CLAUDE.md` | Policy and routing only. Every line competes for attention, so it stays small. |
 
 If something *must* happen, it belongs in the enforced layer. `CLAUDE.md` explains the gates;
@@ -546,6 +547,7 @@ sometimes a local companion to it, for the reason set out below.
 **The rule:** a PR that touches any of
 
 - `.claude/skills/**`
+- `.claude/commands/**`
 - any component's `verify.sh`, and the self-tests it runs first
 - `.github/workflows/**`
 - `scripts/**`

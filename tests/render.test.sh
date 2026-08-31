@@ -106,5 +106,28 @@ out="$( acb_cmd_init "$f" 2>&1 )"; rc=$?
 if [[ $rc -eq 0 && -f "$f/CLAUDE.md" ]]; then ok "a fresh directory still initialises"
 else bad "a fresh directory still initialises" "exit $rc: $out"; fi
 
+# The scaffolded watched list is what every new consumer starts from, and nothing tested it: the
+# only assertion for the pattern lived in check-sdlc-sync.test.sh's own hand-written fixture, a
+# second copy. Drop the pattern from the scaffold and that suite stays green while every repository
+# initialised afterwards ships an ungoverned tree. The source here is MANIFEST, not a copy.
+w="$(mktemp -d)"
+( cd "$w" && acb_scaffold_config >/dev/null 2>&1 )
+scaf="$(jq -r '[.process.watched[]] | join("|")' "$w/.acb.json" 2>/dev/null)"
+# Without this the block passes vacuously if the scaffold ever fails: grep -qE "" matches anything.
+if [[ -z "$scaf" ]]; then bad "the scaffold writes a watched list" "acb_scaffold_config produced none"; fi
+# A sed that yields no trees would drop every assertion below and move only the total count — the
+# mutant this block survived when it was first written. Counted, so silence is a failure.
+trees=0
+while read -r d; do
+  [[ -n "$d" && -n "$scaf" ]] || continue
+  [[ "$d" == */ ]] && probe="${d}probe.md" || probe="$d"
+  trees=$((trees + 1))
+  if grep -qE "$scaf" <<<"$probe"; then ok "the scaffold watches $d"
+  else bad "the scaffold watches $d" "no process.watched pattern matches the carried tree"; fi
+done < <(sed -n -e 's|^\(\.claude/[^/]*\)/.*|\1/|p' -e 's|^\(\.claude/[^/]*\)$|\1|p' \
+           MANIFEST | LC_ALL=C sort -u)
+if [[ "$trees" -gt 0 ]]; then ok "the carried tree enumeration is not empty"
+else bad "the carried tree enumeration is not empty" "the sed matched no MANIFEST path — every assertion above was skipped"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

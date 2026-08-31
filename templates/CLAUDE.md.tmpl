@@ -14,8 +14,9 @@ whether a change belongs here from this paragraph alone._
 **carried** from the toolkit and byte-identical in every repository that uses it, so it is never
 edited here.
 
-**The process document is a contract:** if you change `.claude/skills/**`, any component's
-`verify.sh`, `.github/workflows/**`, or anything in `scripts/`, update it in the same change. Which
+**The process document is a contract:** if you change `.claude/skills/**`, `.claude/commands/**`,
+any component's `verify.sh`, `.github/workflows/**`, or anything in `scripts/`, update it in the
+same change. Which
 document that is comes from `process.doc` in `.acb.json`, and the watched list from
 `process.watched` beside it. Point `process.doc` at a local companion once this repository has
 process specifics of its own: requiring an edit to the carried file would make this repository
@@ -37,6 +38,10 @@ Which skill when — all vendored in `.claude/skills/`, loaded on demand:
 | Receiving review findings | `receiving-code-review` |
 
 The standing bar every change clears is `.claude/skills/references/definition-of-done.md`.
+
+One command ships alongside them: **`/loop-plan <plan path>`** works a plan to the criteria its
+`## Criteria coverage` table claims, stops when they pass with evidence or when a
+`Human dependencies` entry blocks, and never edits the plan. It is carried, like the skills.
 
 **Tests: the oracle must not come from the implementation.** A test's oracle — whatever decides pass
 from fail — has exactly three legal sources: written first, a document, or a second implementation.
