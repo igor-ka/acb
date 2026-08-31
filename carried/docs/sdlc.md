@@ -546,6 +546,7 @@ sometimes a local companion to it, for the reason set out below.
 **The rule:** a PR that touches any of
 
 - `.claude/skills/**`
+- `.claude/commands/**`
 - any component's `verify.sh`, and the self-tests it runs first
 - `.github/workflows/**`
 - `scripts/**`

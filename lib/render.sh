@@ -84,7 +84,7 @@ acb_scaffold_config() {
   "template": { "repo": "igor-ka/acb", "commit": "" },
   "process": {
     "doc": "docs/sdlc.md",
-    "watched": ["^\\.claude/skills/", "^\\.github/workflows/", "^scripts/"],
+    "watched": ["^\\.claude/skills/", "^\\.claude/commands/", "^\\.github/workflows/", "^scripts/"],
     "prShapeHatch": "[multi-child]",
     "sdlcSyncHatch": "[skip-sdlc-sync]",
     "dependabotEcosystems": []
