@@ -28,6 +28,8 @@ Task tool (general-purpose):
     | Task Decomposition | Tasks have clear boundaries, steps are actionable |
     | Test oracles | Does every task that writes a test name the oracle it asserts — written first, a document (a success criterion, a named invariant, a threat), or a second implementation? "Matches the implementation" is not an oracle: a test whose expected value was read off the code passes whatever the code does |
     | PR boundaries | Does the header name the PRs this plan produces, one child issue each? Does that split match the task graph and its dependency order? Where two children are merged into one PR, is the reason stated and does it hold? |
+    | Criteria coverage | Does the plan carry a `## Criteria coverage` table, after its last task, mapping each spec criterion it claims to the task that discharges it, plus a `Not claimed` line accounting for every criterion the table omits? A missing section is a finding. So is a table that restates criteria instead of naming tasks, and so is a `Not claimed` line that does not add up. |
+    | Human dependencies | If the plan needs a credential, account, approval or by-hand operation from a person, does the header name it and the task it blocks? The field is correctly absent when there are none — but a plan that plainly needs one and does not say so is a finding. |
     | Buildability | Could an engineer follow this plan without getting stuck? |
     | Blast radius | What is the worst case of this change, and how many systems/people does it touch? |
     | Reversibility | If this is wrong, how cheaply can it be undone? Prefer reversible steps. |
