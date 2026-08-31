@@ -159,7 +159,7 @@ reaching for an escape hatch. The staff-engineer review checks the boundaries ag
 graph, so a human sees "seven PRs" before a line is written. The `PR shape` job enforces the same
 rule at merge time, but it is a backstop, not the decision point.
 
-**Every plan carries a `## Definition of done`, after its last task** — a table mapping each spec criterion the plan
+**Every plan carries a `## Criteria coverage`, after its last task** — a table mapping each spec criterion the plan
 claims to the task that discharges it, and a `Not claimed` line accounting for the rest. It is a
 map, never a copy: criteria are named by identifier and never restated, for the same reason an
 epic links rather than pastes.

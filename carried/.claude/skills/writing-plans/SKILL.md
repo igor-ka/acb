@@ -98,14 +98,13 @@ load-bearing — it is the difference between a plan that stops at a known bound
 discovers the boundary mid-run — and where it does not, a line reading "none" is noise in every
 plan in every repository that ever uses this template.
 
-## Definition of done
+## Criteria coverage
 
-**Every plan MUST carry a `## Definition of done` section, placed after the last task.** Only
-`## Plan review log` may follow it. It is a coverage map, not a copy
-of the criteria:
+**Every plan MUST carry a `## Criteria coverage` section, placed after the last task.** Only
+`## Plan review log` may follow it. It is a coverage map, not a copy of the criteria:
 
 ```markdown
-## Definition of done
+## Criteria coverage
 
 | Spec criterion | How this plan satisfies it |
 | --- | --- |
@@ -138,6 +137,12 @@ the plan. Naming the split once turns "is this done?" into a lookup.
 **When there is no separate spec** — the process document says a plan absorbs the spec when
 requirements are clear — the left column is the plan's own Goal, decomposed into checkable
 statements. The section is never omitted.
+
+**This is not the Definition of Done.** `../references/definition-of-done.md` is the standing bar
+every increment clears, the same every time, answering *"is this finished to our standard?"*. This
+section is the opposite column of that file's own table: acceptance criteria, specific to this
+plan, answering *"did we build the right thing?"*. A task is done when both hold, so do not read
+one as the other.
 
 ## Task Structure
 
@@ -204,7 +209,7 @@ failures** — never write them:
 After writing the complete plan, look at the requirements with fresh eyes and check
 the plan against them. This is a checklist you run yourself — not a subagent dispatch.
 
-**1. Requirement coverage:** Build the `## Definition of done` table. A criterion with no task
+**1. Requirement coverage:** Build the `## Criteria coverage` table. A criterion with no task
 is a **gap** — add the task. Move one to `Not claimed` only when it is deliberately outside this
 plan's phase, never to make the table balance.
 

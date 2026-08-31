@@ -113,7 +113,7 @@ Don't silently fill in ambiguous requirements. The spec's entire purpose is to s
 - Never: [...]
 
 ## Success Criteria
-[Numbered, specific, testable conditions — S1, S2, … A plan's Definition of done references them
+[Numbered, specific, testable conditions — S1, S2, … A plan's `## Criteria coverage` table references them
 by number, so the numbering lives here, not in the plan.]
 
 ## Open Questions

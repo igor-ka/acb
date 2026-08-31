@@ -66,7 +66,7 @@ Of the shared `references/`, only `definition-of-done.md`, `security-checklist.m
   buckets: the reviewer classifies each finding as **mechanical** or **judgment** at source, the
   author applies the mechanical ones and lists them for audit, and the judgment ones block on the
   human. Upstream returned one flat list and escalated all of it.
-  It later gained a mandatory `## Definition of done` section — a table mapping each spec criterion
+  It later gained a mandatory `## Criteria coverage` section — a table mapping each spec criterion
   the plan claims to the task that discharges it, plus a `Not claimed` line for the rest — and a
   conditional `Human dependencies` header field, present only when the plan needs a credential,
   account, approval or by-hand operation a person must supply. `planning-reviewer-prompt.md`
