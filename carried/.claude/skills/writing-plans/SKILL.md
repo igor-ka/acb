@@ -100,7 +100,8 @@ plan in every repository that ever uses this template.
 
 ## Definition of done
 
-**Every plan MUST end with a `## Definition of done` section.** It is a coverage map, not a copy
+**Every plan MUST carry a `## Definition of done` section, placed after the last task.** Only
+`## Plan review log` may follow it. It is a coverage map, not a copy
 of the criteria:
 
 ```markdown
@@ -110,7 +111,7 @@ of the criteria:
 | --- | --- |
 | S1 | Task 4 Step 5 — the end-to-end run, against the real integration rather than a fixture. |
 | S3 | Task 7 Steps 1-5. |
-| S7 | Structural: the shape of the change makes the failure unreachable. |
+| S7 | Structural: the launcher flag is set in the same resource, so a default apply cannot strip it. |
 
 **Not claimed:** S2, S4-S6 closed by an earlier plan. S8 is a launch-day measurement.
 ```
@@ -119,10 +120,14 @@ Two rules make it a map rather than a second copy:
 
 - **Never restate a criterion.** Name it by its identifier and point at the task that discharges
   it. A pasted criterion is a second copy that goes stale, and the stale copy is the one people
-  read.
+  read. Where a spec's criteria are not numbered, number them **in the spec** first: an identifier
+  that exists only in the plan cannot be checked against anything, which is the one thing this
+  table is for.
 - **The `Not claimed` line is mandatory**, and it must account for every criterion in the spec the
   table omits. "The spec has eight, this plan claims three" is a complete sentence only when the
-  other five are named.
+  other five are named. When it omits nothing, write `**Not claimed:** none — this plan claims all
+  of them.` Unlike `Human dependencies` this line is never dropped: its absence and "nothing left
+  over" are not distinguishable to a reader.
 
 **Why this belongs in the plan and not in the reader's head.** A spec's criteria define done for
 the *whole* problem; a plan is usually one phase of it. Without this table nothing states which
@@ -199,8 +204,9 @@ failures** — never write them:
 After writing the complete plan, look at the requirements with fresh eyes and check
 the plan against them. This is a checklist you run yourself — not a subagent dispatch.
 
-**1. Requirement coverage:** Skim each requirement. Can you point to a task that
-implements it? List any gaps.
+**1. Requirement coverage:** Build the `## Definition of done` table. A criterion with no task
+is a **gap** — add the task. Move one to `Not claimed` only when it is deliberately outside this
+plan's phase, never to make the table balance.
 
 **2. Placeholder scan:** Search your plan for the red flags from "No Placeholders". Fix them.
 
