@@ -97,13 +97,18 @@ is the control.
 - Modify: `exact/path/to/existing.py:123-145`
 - Test: `tests/exact/path/to/test.py`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test** — *oracle: <where the expected value comes from>*
 
 ```python
 def test_specific_behavior():
     result = function(input)
     assert result == expected
 ```
+
+Name the **oracle** on the step: written first, a document (a success criterion, a named invariant,
+a threat), or a second implementation. Not "matches the implementation" — a test whose expected
+value was read off the code passes whatever the code does, including the bug. If no oracle exists
+yet, that is a gap in the spec, not something to invent while writing the step.
 
 - [ ] **Step 2: Run test to verify it fails**
 
