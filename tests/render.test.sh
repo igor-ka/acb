@@ -106,5 +106,18 @@ out="$( acb_cmd_init "$f" 2>&1 )"; rc=$?
 if [[ $rc -eq 0 && -f "$f/CLAUDE.md" ]]; then ok "a fresh directory still initialises"
 else bad "a fresh directory still initialises" "exit $rc: $out"; fi
 
+# The scaffolded watched list is what every new consumer starts from, and nothing tested it: the
+# only assertion for the pattern lived in check-sdlc-sync.test.sh's own hand-written fixture, a
+# second copy. Drop the pattern from the scaffold and that suite stays green while every repository
+# initialised afterwards ships an ungoverned tree. The source here is MANIFEST, not a copy.
+w="$(mktemp -d)"
+( cd "$w" && acb_scaffold_config >/dev/null 2>&1 )
+scaf="$(jq -r '[.process.watched[]] | join("|")' "$w/.acb.json")"
+while read -r d; do
+  [[ -n "$d" ]] || continue
+  if grep -qE "$scaf" <<<"$d/probe.md"; then ok "the scaffold watches $d/"
+  else bad "the scaffold watches $d/" "no process.watched pattern matches the carried tree"; fi
+done < <(sed -n 's|^\(\.claude/[^/]*\)/.*|\1|p' MANIFEST | LC_ALL=C sort -u)
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

@@ -3,8 +3,8 @@
 How a change gets from an idea to `main` in this repository, and which skill governs each step.
 
 This document is a **contract**. If you change the development process — the skills in
-`.claude/skills/`, any component's `verify.sh`, anything in `scripts/`, or a workflow in
-`.github/workflows/` — update **the document `process.doc` names in `.acb.json`** in the same
+`.claude/skills/`, the commands in `.claude/commands/`, any component's `verify.sh`, anything in
+`scripts/`, or a workflow in `.github/workflows/` — update **the document `process.doc` names in `.acb.json`** in the same
 change. That is usually this file; where a repository keeps its own process specifics separate, it
 is that companion instead. The `SDLC docs` CI job enforces it, and `CLAUDE.md` points at both.
 See [Changing this SDLC](#changing-this-sdlc).

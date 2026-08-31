@@ -47,6 +47,7 @@ acb_cmd_status() {
   fi
 
   acb_check_drift || status=1
+  acb_check_watched
   acb_check_ecosystems
   return $status
 }
@@ -128,6 +129,32 @@ acb_check_drift() {
 # The auto-merge allow-list lives in a repository variable, because that workflow has no checkout
 # by design. Two homes means they can disagree, so status reconciles them. Best-effort: no remote,
 # no gh, or no permission is not a failure of the repository.
+# `acb pull` copies carried files; it never edits `process.watched`, which belongs to the consumer.
+# So a release adding a whole new carried tree under `.claude/` hands every existing consumer a
+# process document asserting that tree is governed, next to a watched list that does not match it.
+# The gate then reports success while checking nothing — the decorative-gate shape.
+#
+# Scoped to `.claude/` deliberately. That is where agent instructions live, so an ungoverned change
+# there is a behaviour change nothing reviews. Carried `docs/` is the process document itself,
+# governed by being `process.doc`, and reporting it would make this check noise — and a check that
+# fires on everything is one people learn to bypass.
+acb_check_watched() {
+  local re gaps=() d
+  re="$(acb_process_arr watched | tr '\n' '|')"; re="${re%|}"
+  [[ -n "$re" ]] || return 0
+  while read -r d; do
+    [[ -n "$d" ]] || continue
+    grep -qE "$re" <<<"$d/probe.md" || gaps+=("$d/")
+  done < <(sed -n 's|^\(\.claude/[^/]*\)/.*|\1|p' "$ACB_ROOT/MANIFEST" | LC_ALL=C sort -u)
+  if ((${#gaps[@]})); then
+    echo "watched: ${#gaps[@]} carried tree(s) outside process.watched — the SDLC gate reports"
+    echo "  success without checking them. Add a pattern for each to .acb.json:"
+    printf '    %s\n' "${gaps[@]}"
+  else
+    echo "watched: every carried .claude/ tree is governed"
+  fi
+}
+
 acb_check_ecosystems() {
   local declared actual repo
   declared="$(acb_process_arr dependabotEcosystems | LC_ALL=C sort | tr '\n' ' ')"
