@@ -41,7 +41,11 @@ asserts_lacks "does not use the directory as a job name" 'name: api$'    "$ci"
 
 rules="$(acb_render_ruleset)"
 asserts_lacks "ruleset leaves no marker"           '@@'                  "$rules"
-asserts_has   "ruleset enables Copilot review"     'copilot_code_review' "$rules"
+# The scaffold deliberately no longer enables Copilot code review: it is entitlement-gated, so the
+# toolkit cannot know whether a consumer has it, and a rule that advertises a review nobody receives
+# is worse than no rule. The inverse is asserted instead — scaffolding it back in would be a
+# decision, not a typo.
+asserts_lacks "ruleset does not assume Copilot review" 'copilot_code_review' "$rules"
 if jq -e . <<<"$rules" >/dev/null 2>&1; then ok "ruleset is valid JSON"
 else bad "ruleset is valid JSON" "jq rejected it"; fi
 
